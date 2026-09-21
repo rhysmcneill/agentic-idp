@@ -1,0 +1,56 @@
+# Binaries and build output
+/bin/
+/dist/
+*.exe
+*.dll
+*.so
+*.dylib
+idpctl
+agentic-idp-server
+agentic-idp-worker
+
+# Test and coverage output
+*.test
+*.out
+coverage.*
+
+# Go workspace files — machine-local, never shared
+go.work
+go.work.sum
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Frontend (from Phase 3)
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Claude Code local configuration — machine-specific, not shared
+.claude/settings.local.json
+.claude/config.local.json
+.claude/**/*.local.json
+
+# Impeccable downloads its own binary and data on first run (~13MB).
+# The skill definition and reference docs ARE tracked; the payload is not.
+.claude/skills/impeccable/scripts/bin/
+.claude/skills/impeccable/scripts/data/

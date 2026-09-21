@@ -1,0 +1,52 @@
+Business Source License 1.1
+
+PARAMETERS
+
+Licensor:             Rhys McNeill
+
+Licensed Work:        agentic-idp
+                      The Licensed Work is (c) 2026 Rhys McNeill
+
+Additional Use Grant: You may make use of the Licensed Work, provided that
+                      you do not use the Licensed Work in a production
+                      environment for commercial purposes.
+
+                      Non-production use — including evaluation, development,
+                      testing and personal use — is permitted without charge.
+
+Change Date:          Four years from the date each version is first published.
+
+Change License:       Apache License, Version 2.0
+
+-------------------------------------------------------------------------------
+
+ACTION REQUIRED BEFORE FIRST PUBLIC COMMIT
+
+This file currently contains only the BSL parameters block. The canonical
+Business Source License 1.1 legal text has NOT been reproduced here, because
+licence text should be copied verbatim from the authoritative source rather
+than transcribed.
+
+Before publishing this repository:
+
+  1. Copy the full BSL 1.1 text from https://mariadb.com/bsl11/
+  2. Paste it below this notice, keeping the parameters block above intact
+  3. Fill in the Licensor name — see the note on entity ownership below
+  4. Delete this "ACTION REQUIRED" section
+
+Two further items to settle before the repository becomes public:
+
+  - ENTITY OWNERSHIP. Decide who the Licensor is: an individual or a company.
+    If this work is intended to be sold, keep it clearly separate from any
+    employer's accounts, equipment and time, so ownership of the intellectual
+    property is unambiguous. Worth a short conversation with a solicitor
+    before the first public commit rather than after.
+
+  - CONTRIBUTOR LICENCE AGREEMENT. Put a CLA in place before accepting the
+    first external pull request. Under BSL this matters more than it would
+    under a permissive licence: as licensor you need the rights to offer
+    commercial licences covering the whole codebase, and to later extract
+    contributor-written code into the planned Apache 2.0 library. A DCO
+    sign-off alone does not grant those rights.
+
+See docs/DECISIONS.md entry 012 for the full reasoning behind this choice.
