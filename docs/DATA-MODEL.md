@@ -120,12 +120,12 @@ Every governed action needs the worker's broker to answer one question: *given t
 |---|---|---|
 | `environment_id` | `uuid` PK, REFERENCES `environments` ON DELETE CASCADE | 1:1 — exists only for rows where `environments.provider = 'aws'` |
 | `account_ref` | `text` NOT NULL | AWS account ID |
-| `external_id` | `bytea` NOT NULL | STS external ID, **encrypted at rest** — see below |
+| `external_id` | `text` NOT NULL | STS external ID — see below |
 | `trust_anchor` | `text` NOT NULL | the principal/OIDC-provider ARN the worker assumes from |
 
 The account-level identity: which AWS account, what proves this isn't a confused-deputy attack, and which principal is trusted to assume into it. This is what `pkg/cloud.Broker.ValidateEnvironment` checks and hands to `MintCredentials` — without it the worker has no way to know which customer AWS account an `Environment` row refers to. **Never static keys** — this table stores identifiers used to *assume* a role, never a long-lived credential, matching the control plane's "never holds cloud credentials" invariant.
 
-`external_id` sits in a middle tier of sensitivity: not a `pkg/ci.Secret`-grade live credential, but more sensitive than a plain ARN — AWS's own confused-deputy guidance treats a leaked external ID as weakening (though not by itself breaking) that protection. So it's stored **encrypted at rest** (`pgcrypto`, or application-level envelope encryption against a KMS-held key — pick one during Phase 0 implementation) and is **never returned in an API response body** once past initial registration, the same posture as a webhook signing key even though it doesn't get the full `pkg/ci.Secret` treatment (that pattern is for values the *worker* handles at runtime; this one only the control plane ever reads).
+`external_id` is not a bearer credential: per AWS's own confused-deputy guidance, knowing it alone does not let anyone assume the role — the trust policy's `Principal` must also match the caller's genuine identity. A leak weakens the confused-deputy protection but does not by itself grant access, so it's stored as a **plain column**, like `trust_anchor` and `role_arn` below. It's still **never returned in an API response body** once past initial registration — that's an API-layer least-exposure control, not encryption, and proportionate to what the value can and can't do on its own.
 
 #### `environment_aws_tier_roles`
 
@@ -135,7 +135,7 @@ The account-level identity: which AWS account, what proves this isn't a confused
 | `tier` | `smallint` NOT NULL CHECK (1–3) | |
 | `role_arn` | `text` NOT NULL | |
 
-`PRIMARY KEY (environment_id, tier)`. The per-tier binding: for this environment, which IAM role does a `ReadOnly` vs `HumanInTheLoop` vs `Autonomous` action assume — one role per tier, never one role narrowed by session policies ([Decision 006](DECISIONS.md)). `MintCredentials(cfg, tier)` looks this up before calling `sts:AssumeRole`. `role_arn` is a plain column: an ARN identifies a role but does not itself grant access to assume it (the role's trust policy and the external ID do that work), so it doesn't need the same encryption treatment as `external_id`.
+`PRIMARY KEY (environment_id, tier)`. The per-tier binding: for this environment, which IAM role does a `ReadOnly` vs `HumanInTheLoop` vs `Autonomous` action assume — one role per tier, never one role narrowed by session policies ([Decision 006](DECISIONS.md)). `MintCredentials(cfg, tier)` looks this up before calling `sts:AssumeRole`. `role_arn` is a plain column: an ARN identifies a role but does not itself grant access to assume it — the role's trust policy and the external ID do that work.
 
 #### GCP / Azure (sketch only, not implemented)
 

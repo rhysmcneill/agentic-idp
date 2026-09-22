@@ -75,7 +75,8 @@ func (c Claims) PermitsEnvironment(env string) bool {
 }
 
 // IssueRequest is the input to Issue. Delegation is set here, by whoever holds
-// the signing key, and nowhere else — see the package doc.
+// the signing key, and nowhere else — nothing constructs a Claims from
+// caller-supplied delegation data.
 type IssueRequest struct {
 	TenantID     string
 	ActorID      string

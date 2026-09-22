@@ -29,6 +29,7 @@ Never:
 - Restating the signature or the next line in prose
 - References to tasks, tickets, PRs, or "added for X" — that belongs in commit messages
 - Section banners and decorative separators
+- "See `docs/X.md`" as a substitute for stating the why inline — a comment that just points elsewhere makes the reader go fetch context that belongs in the comment itself
 
 Exported identifiers in `pkg/` get **one line**, since that package is public API and an extraction candidate. Skip it when the name already says it. Everything in `internal/` gets a comment only under the rules above.
 
