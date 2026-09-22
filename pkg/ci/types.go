@@ -15,16 +15,19 @@ import (
 // Provider identifies a CI system implementation.
 type Provider string
 
+// Supported CI providers
 const (
 	ProviderGitHubActions Provider = "github_actions"
 	ProviderGitLabCI      Provider = "gitlab_ci"
 	ProviderJenkins       Provider = "jenkins"
 	ProviderAtlantis      Provider = "atlantis"
+	ProviderBitbucket     Provider = "bitbucket_pipelines"
 )
 
 // Status is the normalised run state across providers.
 type Status string
 
+// Normalised run states, mapped from each provider's native status.
 const (
 	StatusPending   Status = "pending"
 	StatusRunning   Status = "running"
@@ -113,7 +116,14 @@ type Secret string
 
 func (Secret) String() string { return "[REDACTED]" }
 
-func (Secret) MarshalJSON() ([]byte, error) { return json.Marshal("[REDACTED]") }
+// MarshalJSON redacts the secret so it never reaches a logged or persisted payload.
+func (Secret) MarshalJSON() ([]byte, error) {
+	b, err := json.Marshal("[REDACTED]")
+	if err != nil {
+		return nil, fmt.Errorf("ci: marshalling redacted secret: %w", err)
+	}
+	return b, nil
+}
 
 // Reveal returns the underlying value. Call it as late as possible.
 func (s Secret) Reveal() string { return string(s) }

@@ -3,9 +3,16 @@ package identity
 import "errors"
 
 var (
+	// ErrInvalidRequest is returned by Issue when the request is malformed,
+	// e.g. a missing TenantID/ActorID or an invalid Tier.
 	ErrInvalidRequest = errors.New("identity: invalid issue request")
-	ErrTokenInvalid   = errors.New("identity: token invalid")
-	ErrTokenExpired   = errors.New("identity: token expired")
+
+	// ErrTokenInvalid is returned by Verify when the token fails signature
+	// or structural validation.
+	ErrTokenInvalid = errors.New("identity: token invalid")
+
+	// ErrTokenExpired is returned by Verify when the token's ExpiresAt has passed.
+	ErrTokenExpired = errors.New("identity: token expired")
 
 	// ErrPrivilegeEscalation is returned by Issue when the issuing actor
 	// attempts to grant a tier higher than its own. See docs/AGENT-MODEL.md:

@@ -25,7 +25,7 @@ This sentence is the test for every feature request. If a proposal requires us t
 | **General drift detection** | Needs state access and scheduled plans; unrelated to agent governance; in the delegate-to-CI model we may not even have state access | Firefly, Spacelift, env0, HCP |
 | **Terraform state management** | Backends, locking, concurrency, workspaces. This is precisely why several companies exist | Spacelift, env0, Scalr, HCP |
 | **Authoring infrastructure code** | The customer's IaC lives in the customer's repos, authored by them | The customer |
-| **Being a CI system** | They have one. No CI means not yet a customer | GitHub Actions, GitLab, Jenkins |
+| **Being a CI system** | They have one. No CI means not yet a customer | GitHub Actions, GitLab, Jenkins, Bitbucket |
 | **Sandboxed code execution** | The worker runs inside the customer's trust boundary, where they already accept this risk for CI | E2B, Modal, Northflank |
 | **Secrets management** | Deliberately deferred; large, well-served, orthogonal | Vault, AWS Secrets Manager |
 

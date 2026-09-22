@@ -18,7 +18,7 @@ So delivery capability has to land **at or before** the roadmap phase whose mile
 | Makefile | Single command interface — lint, format, build, test, docker, publish — that CI calls into rather than duplicating |
 | Pre-commit hooks | Local `pre-commit` framework, same shape as [ssmctl](https://github.com/rhysmcneill/ssmctl)'s config, mirroring Makefile targets |
 | CI | Build, vet, format check, lint, test — on every PR |
-| Dockerfiles | One per deployable service (`controlplane`, `worker`, `mcp`; `frontend` from Phase 3) |
+| Dockerfiles | One per deployable service, written when that service's entrypoint lands, not batched upfront: `controlplane`/`worker` in Phase 0, `mcp` in Phase 2, `frontend` in Phase 3 |
 | Image publishing | Tagged builds pushed to a registry on merge and release |
 | Versioning | `semantic-release`, driven by conventional commits |
 | Dependency updates | Dependabot (or Renovate) |
@@ -56,7 +56,7 @@ Targets land incrementally as the capability they wrap exists, but the shape abo
 - **Dependabot**: enabled from the first `go.mod`. `pkg/ci` and the credential-handling packages are the ones that matter most here — see [CLAUDE.md](../CLAUDE.md) Security invariants.
 - **Codecov**: wired alongside CI. Cheap, and the point of doing it now is establishing the coverage number before code accumulates that quietly lowers it — a baseline set later is not a baseline, it's a negotiation.
 - **Conventional commits**: adopted now even though nothing consumes them yet, specifically so that turning on `semantic-release` in Phase 1 is a config change, not a rewrite of commit history or a "starting now" carve-out.
-- **Dockerfiles**: `controlplane` and `worker` get one each, plus `docker-compose.yml` for local dev. This is not optional polish — the Phase 0 milestone requires a *customer-run* worker, and "customer-run" means containerised, not `go run` from a cloned repo.
+- **Dockerfiles**: `controlplane` and `worker` get one each, plus `docker-compose.yml` for local dev. This is not optional polish — the Phase 0 milestone requires a *customer-run* worker, and "customer-run" means containerised, not `go run` from a cloned repo. Sequencing: each service's Dockerfile is written once that service has a real `cmd/` entrypoint to build, not upfront against an empty skeleton — `controlplane`'s lands with its `cmd/server` work, `worker`'s with its `cmd/worker` work, `docker-compose.yml` once both exist to wire together. The Makefile's `docker-build-*` targets and Phase 0 tooling (CI, pre-commit, Dependabot, Codecov, conventional commits) still land first, since those apply from the first line of Go code regardless of which service it's in.
 
 ### Phase 1 — publishing and versioning go live
 
