@@ -108,7 +108,7 @@ Per-provider adapters, because the mechanisms differ fundamentally:
 | GitHub Actions | `workflow_dispatch` | `204 No Content` — **no run ID**; must be discovered by correlation |
 | Jenkins | `buildWithParameters` | A queue item to resolve into a build number |
 | GitLab CI | Trigger token / API | Pipeline object with ID immediately |
-| Buildkite, Spacelift, env0 | REST | Run/build with ID immediately |
+| Buildkite, Spacelift, env0, Bitbucket Pipelines | REST | Run/build with ID immediately |
 | Atlantis | **PR comment** — no API at all | Nothing; correlate via PR |
 
 The worker triggers, not the control plane, because it can reach self-hosted CI. It therefore holds CI credentials alongside cloud credentials, consistently.

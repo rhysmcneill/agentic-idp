@@ -166,7 +166,7 @@ When those providers ship, each adds its own pair, following the same split — 
 | `id` | `uuid` PK | |
 | `tenant_id` | `uuid` NOT NULL REFERENCES `tenants` | |
 | `environment_id` | `uuid` NOT NULL REFERENCES `environments` | which environment this pipeline config applies to |
-| `provider` | `text` NOT NULL | mirrors `pkg/ci.Provider` (`github_actions`, `gitlab_ci`, `jenkins`, `atlantis`) |
+| `provider` | `text` NOT NULL | mirrors `pkg/ci.Provider` (`github_actions`, `gitlab_ci`, `jenkins`, `atlantis`, `bitbucket_pipelines`) |
 | `workflow_ref` | `text` NOT NULL | e.g. a GitHub Actions workflow file path |
 | `settings` | `jsonb` NOT NULL DEFAULT `'{}'` | mirrors `pkg/ci.Config.Settings` — provider-specific, deliberately loose since each adapter defines its own required keys via `Config.Require` |
 | `created_at` | `timestamptz` NOT NULL DEFAULT `now()` | |

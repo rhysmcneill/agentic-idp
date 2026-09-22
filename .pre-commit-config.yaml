@@ -1,0 +1,75 @@
+# Pre-commit hooks for agentic-idp. Run `make setup` once after cloning.
+#
+# Mirrors the project's Makefile targets (`make fmt`, `make vet`, `make
+# lint`) so contributors run the same checks locally that CI runs on every
+# PR.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: no-commit-to-branch
+        args: [--branch, main]
+      - id: check-yaml
+      - id: check-json
+
+  - repo: https://github.com/dnephin/pre-commit-golang
+    rev: v0.5.1
+    hooks:
+      - id: go-fmt
+
+  - repo: local
+    hooks:
+      # go-vet: dnephin's hook ignores pass_filenames overrides so we run it
+      # as a local system hook with ./... to avoid "no Go files" errors.
+      - id: go-vet
+        name: go vet
+        language: system
+        entry: go
+        args: [vet, ./...]
+        types: [go]
+        pass_filenames: false
+      # golangci-lint must be a local hook: the dnephin plugin builds it from
+      # source using its own Go toolchain which may be older than this module's
+      # go directive, causing a version mismatch. Install/upgrade with:
+      #   GOTOOLCHAIN=local go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+      - id: golangci-lint
+        name: golangci-lint
+        language: system
+        entry: env GOTOOLCHAIN=local golangci-lint
+        args: [run, --fix=false]
+        types: [go]
+        pass_filenames: false
+      # gosec has no .pre-commit-hooks.yaml in any release — must be local.
+      # Install: go install github.com/securego/gosec/v2/cmd/gosec@latest
+      - id: gosec
+        name: gosec
+        language: system
+        entry: gosec
+        args: [./...]
+        types: [go]
+        pass_filenames: false
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        # Baseline suppresses known findings. Regenerate with:
+        #   detect-secrets scan > .secrets.baseline
+        args: [--baseline, .secrets.baseline]
+
+  - repo: https://github.com/alessandrojcm/commitlint-pre-commit-hook
+    rev: v9.25.0
+    hooks:
+      - id: commitlint
+        # Enforces conventional commits per CLAUDE.md's "Git & commits".
+        # Reads .commitlintrc.yaml at repo root.
+        stages: [commit-msg]
+        additional_dependencies: ["@commitlint/config-conventional"]

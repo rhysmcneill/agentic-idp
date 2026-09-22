@@ -15,7 +15,11 @@ import (
 // distributed to anything that needs to verify them (the worker, the MCP
 // server).
 func GenerateKeyPair() (ed25519.PublicKey, ed25519.PrivateKey, error) {
-	return ed25519.GenerateKey(rand.Reader)
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("identity: generating key pair: %w", err)
+	}
+	return pub, priv, nil
 }
 
 type jwtClaims struct {
@@ -32,6 +36,7 @@ type Issuer struct {
 	key ed25519.PrivateKey
 }
 
+// NewIssuer constructs an Issuer from a private signing key.
 func NewIssuer(key ed25519.PrivateKey) *Issuer { return &Issuer{key: key} }
 
 // Issue mints a token for req. issuerTier is the authority of whoever is
@@ -66,7 +71,11 @@ func (i *Issuer) Issue(req IssueRequest, issuerTier Tier) (string, error) {
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
-	return token.SignedString(i.key)
+	signed, err := token.SignedString(i.key)
+	if err != nil {
+		return "", fmt.Errorf("identity: signing token: %w", err)
+	}
+	return signed, nil
 }
 
 // Verifier checks tokens. It holds only the public key, so a compromised
@@ -75,6 +84,7 @@ type Verifier struct {
 	key ed25519.PublicKey
 }
 
+// NewVerifier constructs a Verifier from a public key.
 func NewVerifier(key ed25519.PublicKey) *Verifier { return &Verifier{key: key} }
 
 // Verify returns the Claims embedded in a signed token, or an error. This is
@@ -82,7 +92,7 @@ func NewVerifier(key ed25519.PublicKey) *Verifier { return &Verifier{key: key} }
 // — there is no constructor that accepts caller-supplied claims directly.
 func (v *Verifier) Verify(tokenString string) (*Claims, error) {
 	var claims jwtClaims
-	_, err := jwt.ParseWithClaims(tokenString, &claims, func(t *jwt.Token) (any, error) {
+	_, err := jwt.ParseWithClaims(tokenString, &claims, func(_ *jwt.Token) (any, error) {
 		return v.key, nil
 	}, jwt.WithValidMethods([]string{"EdDSA"}))
 

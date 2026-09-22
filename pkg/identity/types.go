@@ -9,8 +9,10 @@ package identity
 
 import "time"
 
+// ActorType distinguishes a human from an agent actor.
 type ActorType string
 
+// The two kinds of actor a token can identify.
 const (
 	ActorHuman ActorType = "human"
 	ActorAgent ActorType = "agent"
@@ -31,12 +33,14 @@ const (
 // (Environments), not encoded in Tier.
 type Tier int
 
+// The trust tiers, in ascending order of unsupervised authority.
 const (
 	TierReadOnly       Tier = 1 // no action authority
 	TierHumanInTheLoop Tier = 2 // may propose; a human approves each action before execution
 	TierAutonomous     Tier = 3 // acts unattended within its granted environments; monitored and revocable after the fact
 )
 
+// Valid reports whether t is one of the defined tiers.
 func (t Tier) Valid() bool { return t >= TierReadOnly && t <= TierAutonomous }
 
 // Delegation identifies who authorised an agent to act, fixed at Issue time.
