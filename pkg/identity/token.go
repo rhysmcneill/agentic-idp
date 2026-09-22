@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 // GenerateKeyPair creates a new Ed25519 signing key. The private key stays
@@ -59,6 +61,7 @@ func (i *Issuer) Issue(req IssueRequest, issuerTier Tier) (string, error) {
 	now := time.Now()
 	claims := jwtClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        uuid.New().String(),
 			Subject:   req.ActorID,
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(req.TTL)),
@@ -90,7 +93,15 @@ func NewVerifier(key ed25519.PublicKey) *Verifier { return &Verifier{key: key} }
 // Verify returns the Claims embedded in a signed token, or an error. This is
 // the only path by which a Claims value comes into existence outside of Issue
 // — there is no constructor that accepts caller-supplied claims directly.
-func (v *Verifier) Verify(tokenString string) (*Claims, error) {
+//
+// checker is consulted after signature and expiry both check out, so a
+// revoked session or a whole-identity-revoked actor is rejected even with an
+// otherwise valid token — see RevocationChecker.
+func (v *Verifier) Verify(ctx context.Context, tokenString string, checker RevocationChecker) (*Claims, error) {
+	if checker == nil {
+		return nil, fmt.Errorf("identity: verify: a RevocationChecker is required")
+	}
+
 	var claims jwtClaims
 	_, err := jwt.ParseWithClaims(tokenString, &claims, func(_ *jwt.Token) (any, error) {
 		return v.key, nil
@@ -103,9 +114,18 @@ func (v *Verifier) Verify(tokenString string) (*Claims, error) {
 		return nil, fmt.Errorf("%w: %v", ErrTokenInvalid, err)
 	}
 
+	revoked, err := checker.IsRevoked(ctx, claims.Subject, claims.ID)
+	if err != nil {
+		return nil, fmt.Errorf("identity: verify: checking revocation: %w", err)
+	}
+	if revoked {
+		return nil, ErrTokenRevoked
+	}
+
 	return &Claims{
 		TenantID:     claims.TenantID,
 		ActorID:      claims.Subject,
+		Jti:          claims.ID,
 		ActorType:    claims.ActorType,
 		Tier:         claims.Tier,
 		Environments: claims.Environments,
