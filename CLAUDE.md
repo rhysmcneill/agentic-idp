@@ -2,6 +2,15 @@
 
 These are enforceable rules for working in this repo, not aspirational guidance. Where a rule references a doc, that doc is the source of truth and this file is the summary — if they disagree, fix the drift rather than picking one silently.
 
+## Project management
+
+Work is tracked in GitHub, not by editing checkboxes into design docs:
+
+- [V1-ROADMAP.md](docs/V1-ROADMAP.md) is the design source of truth for *what* the phases contain and why they're sequenced that way — it does not track completion state.
+- Progress is tracked via [GitHub milestones](https://github.com/rhysmcneill/agentic-idp/milestones) (one per phase) and their issues, each carrying a checklist mirrored from the roadmap.
+- The [project board](https://github.com/users/rhysmcneill/projects/1) gives a Todo/In Progress/Done view across all of them.
+- If a roadmap phase changes, update the doc first, then reconcile the matching issue's checklist in the same PR — don't let them drift apart (see the rule above).
+
 ## Comments
 
 Default to **no comment**. Well-named identifiers document what code does; a comment restating that is noise that rots.
@@ -29,7 +38,7 @@ If deleting a comment would not confuse a future reader, delete it.
 
 These are load-bearing. Changing code that touches them requires re-reading [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) first.
 
-- `sts:AssumeRole` is called **only** from `worker/internal/broker`. Nowhere else, ever.
+- `sts:AssumeRole` is called **only** from `worker/internal/broker/aws`. Nowhere else, ever. It implements `pkg/cloud.Broker` — a provider-agnostic interface with only the AWS side built in v1 (decision 017) — so never let AWS-specific assumptions leak into `pkg/cloud` itself.
 - The control plane never holds or receives cloud credentials.
 - Delegation and authority come from **verified token claims**, never from a request body or parameter. Anything crossing a boundary the far side could forge is audit-only.
 - The MCP server forwards the agent's token. It never substitutes its own identity.
@@ -102,9 +111,13 @@ These are load-bearing. Changing code that touches them requires re-reading [doc
 
 ## CI/CD (our own, not the customer's)
 
-- `.github/workflows/` runs `go build`, `go vet`, `gofmt -l` (fail on output), and `go test ./...` on every PR before this project has its own more elaborate pipeline — this is table stakes, not a nice-to-have, and should exist before the second contributor (internal or external) touches the repo.
-- Security-sensitive packages (`pkg/ci`, `pkg/identity`, `pkg/ciauth`, `worker/internal/broker`) get a required review, once there is more than one contributor — self-review is fine solo, but the rule should exist in the workflow config so it activates automatically the moment it isn't just you.
+Full placement of CI, Dockerfiles, image publishing, versioning and Dependabot/Codecov across phases lives in [docs/DELIVERY.md](docs/DELIVERY.md) — not repeated here. The rules that apply regardless of phase:
+
+- A repo-root `Makefile` is the single interface for lint, format, build, test, docker and publish commands — CI workflows call `make <target>`, not inlined shell, so a contributor gets the exact same command locally that CI runs. Based on [ssmctl](https://github.com/rhysmcneill/ssmctl/blob/main/Makefile)'s Makefile (fmt/vet/lint/test/setup/ci targets reused as-is), extended with per-service `build-<service>`/`docker-build-<service>`/`publish` targets for this repo's multiple deployables. Frontend targets join it once the frontend exists (Phase 3).
+- `pre-commit` runs the fast Go gates (`go vet`, `golangci-lint`, `gosec`), general hygiene checks, `detect-secrets`, and `commitlint` before a commit lands — same shape as [ssmctl](https://github.com/rhysmcneill/ssmctl)'s config, mirroring the Makefile targets rather than re-encoding the checks separately. Lands in Phase 0.
+- Security-sensitive packages (`pkg/ci`, `pkg/identity`, `pkg/ciauth`, `pkg/cloud`, `worker/internal/broker`) get a required review once there is more than one contributor — self-review is fine solo, but the rule should exist in workflow config so it activates automatically the moment it isn't just you.
 - Never commit `--no-verify` or skip CI to unblock a merge; fix the underlying failure.
+- Publishing credentials (registry push, release tokens) live only in CI secrets, are scoped to `main`/tag-triggered jobs, and are never in scope for a PR build.
 
 ## Frontend (from Phase 3)
 

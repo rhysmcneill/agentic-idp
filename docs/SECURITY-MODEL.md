@@ -32,13 +32,19 @@ Agent tokens are:
 
 Tiers are not a UI convention. They are enforced at the AWS credential level.
 
-| Tier | Typical authority |
-|---|---|
-| 1 | Read-only; inspect catalog and run history |
-| 2 | Deploy to non-production unattended |
-| 3 | Production — **propose only**; a human approves the diff |
+A tier is **not an environment.** Naming a tier after one (an earlier draft used "non-prod"/"prod") would conflate two independent things: how much authority a tier carries, and which environments an actor may act *in* at all (a separate scope on its token, checked independently — a given environment can also carry its own risk setting requiring approval regardless of tier).
 
-Realistically agents sit at tiers 1–2. Tier 3 for an agent means it can open the change, not land it.
+The tier scale is a **ceiling of unsupervised trust**: higher means more trusted to act without a human checking each action — the same way fully autonomous, auto-rollback continuous deployment is a more mature, more trusted state than manual-approval-gated deployment, not a lesser one. `Autonomous` outranks `HumanInTheLoop` because it needs no per-action check at all; `HumanInTheLoop` is the intermediate, still-supervised state.
+
+| Tier | Name | Authority |
+|---|---|---|
+| 1 | `ReadOnly` | No action authority; inspect catalog, runs, audit |
+| 2 | `HumanInTheLoop` | May propose; a human approves **each action before** it executes |
+| 3 | `Autonomous` | Acts unattended within its granted environments — no pre-approval, but monitored and revocable after the fact |
+
+Realistically agents sit at `ReadOnly`/`HumanInTheLoop` for production-adjacent work; `Autonomous` is reserved for well-proven, low-risk paths.
+
+This ordering is also what makes the privilege-escalation rule (an actor cannot mint one with more authority than itself — see [AGENT-MODEL.md](AGENT-MODEL.md)) actually prevent something meaningful: a `HumanInTheLoop` actor, which never acts without a human checking it, must not be able to mint an `Autonomous` agent that acts with no check at all. That would launder supervised trust into unsupervised trust — the reverse ordering would have permitted exactly that.
 
 ## Role per trust tier — not session policies
 

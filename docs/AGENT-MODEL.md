@@ -26,7 +26,7 @@ Three equivalent paths. All go through the **same internal service layer** — c
 
 Agent enrolment is a first-class UI workflow, not a CLI-only capability. The person authorising an agent is often a team lead or platform admin who does not live in a terminal, and enrolment belongs next to the approvals and audit surfaces where governance already happens.
 
-The UI flow captures: name, owning team, trust tier, permitted environments, and an expiry. It shows what authority is being granted in plain language before confirming — the granting human should not have to infer what tier 2 means.
+The UI flow captures: name, owning team, trust tier, permitted environments, and an expiry. It shows what authority is being granted in plain language before confirming — the granting human should not have to infer what `Autonomous` means from a bare number. See [SECURITY-MODEL.md](SECURITY-MODEL.md) for the tier names and why they describe autonomy rather than environment.
 
 ### CLI
 
@@ -34,7 +34,7 @@ The UI flow captures: name, owning team, trust tier, permitted environments, and
 idpctl agent create \
   --name claude-code-rhys \
   --team platform \
-  --tier 2 \
+  --tier autonomous \
   --environments staging
 ```
 
@@ -44,7 +44,7 @@ For programmatic enrolment — provisioning agents as part of a team's own onboa
 
 ### Who may enrol whom
 
-**An actor may never grant an agent more authority than it holds itself.** A tier-2 human cannot mint a tier-3 agent. Without this rule, enrolment becomes a trivial privilege-escalation path and every other control is moot.
+**An actor may never grant an agent more authority than it holds itself.** A `HumanInTheLoop` human — one whose own actions always need a check — cannot mint an `Autonomous` agent that needs no check at all. Without this rule, enrolment becomes a trivial privilege-escalation path: supervised trust laundered into unsupervised trust.
 
 **Agents may not enrol agents** by default. Recursive delegation launders authority: if agent A can mint agent B, the delegation chain becomes a place to hide rather than a record. If this is ever needed, it must be an explicit, separately-granted capability with the chain preserved in full.
 
@@ -119,7 +119,7 @@ All three converge on the same service layer and the same policy checks. There i
 
 ## Several agents, one human
 
-Expected and supported. Rhys may have Claude Code locally at tier 2 for staging, and a CI-triggered remediation agent at tier 1. Distinct identities, distinct tokens, distinct audit trails, both delegating to Rhys. The model working as intended rather than an edge case.
+Expected and supported. Rhys may have Claude Code locally at `Autonomous` for staging, and a CI-triggered remediation agent at `ReadOnly`. Distinct identities, distinct tokens, distinct audit trails, both delegating to Rhys. The model working as intended rather than an edge case.
 
 ## Metering
 
@@ -128,5 +128,5 @@ Expected and supported. Rhys may have Claude Code locally at tier 2 for staging,
 ## Open questions
 
 - **Session token TTL.** Short enough to limit a leak, long enough not to interrupt a working agent mid-task. Needs a real number informed by how long agent sessions actually run.
-- **Enrolment approval.** Should minting a tier-3 agent itself require a second approver? Arguably yes for production authority, but it adds friction at exactly the moment someone is trying the product.
+- **Enrolment approval.** Should minting an `Autonomous` agent itself require a second approver, given it carries the most unsupervised trust in the system? Arguably yes, but it adds friction at exactly the moment someone is trying the product.
 - **Agent discovery.** When an agent is registered, should it be able to enumerate its own permitted environments and actions, or should that be pushed to it? Discovery is friendlier; pushing is tighter.

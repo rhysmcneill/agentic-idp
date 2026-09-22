@@ -4,6 +4,8 @@ Sequenced so the hardest-to-copy pieces land first and can be validated with des
 
 A note on pacing: solo with no hard deadline still means validation speed matters. Phases 0–4 as scoped is comfortably a year of solo work. **Phase 1 is the earliest honest demo** — the goal is to reach it and put it in front of someone, not to complete Phase 4 in private.
 
+**Delivery and CI/CD run as a parallel track**, not a phase of their own — see the per-phase call-outs below and the full picture in [DELIVERY.md](DELIVERY.md). The short version: build/lint/test CI and Dependabot start in Phase 0 alongside the first code, Dockerfiles and image publishing land by the end of Phase 0 because the milestone requires a customer to actually run the worker, and semantic-release versioning starts the moment Phase 1 produces something worth a design partner deploying.
+
 ---
 
 ## Phase 0 — Prove the trust model
@@ -14,11 +16,19 @@ Deliberately tiny. No OIDC, no catalog, no frontend.
 - Agent enrolment via CLI and API (UI comes in Phase 3) — see [AGENT-MODEL.md](AGENT-MODEL.md)
 - Static admin bootstrap token
 - `Environment` registration: tier role ARNs, external ID, trust anchor
-- `sts:AssumeRole` connectivity check
+- **`pkg/cloud.Broker`**: provider-agnostic credential-broker interface, with `worker/internal/broker/aws` as the only implementation — see decision 017. GCP/Azure stay deferred; only the interface is generalised now
+- `sts:AssumeRole` connectivity check, via the AWS broker
 - Append-only audit log
 - Worker skeleton: polls control plane, assumes role, reports back
 
-**Milestone** — a mock agent carrying a bound delegation claim triggers a no-op job that a customer-run worker executes by assuming a real tier role.
+**Delivery, alongside the above** (see [DELIVERY.md](DELIVERY.md)):
+- CI on every PR: build, `go vet`, `gofmt -l`, `go test ./...`, `golangci-lint`
+- Dependabot enabled from the first `go.mod` — this is also the first thing that touches `pkg/ci`, `pkg/cloud` and `worker/internal/broker`, so scan it from day one
+- Codecov wired in alongside CI, establishing the coverage baseline before code accumulates that lowers it
+- Conventional commits adopted now, even though nothing consumes them yet — this is what makes semantic-release a drop-in later rather than a retrofit
+- **Dockerfiles for `controlplane` and `worker`**, plus `docker-compose.yml` for local dev — not deferred to Phase 3, because the Phase 0 milestone below is not real unless a customer can actually run these as containers
+
+**Milestone** — a mock agent carrying a bound delegation claim triggers a no-op job that a customer-run **containerised** worker executes by assuming a real tier role.
 
 **Verification**
 - The control plane stores no credentials; dumping the database yields nothing usable against the customer's cloud
@@ -39,10 +49,15 @@ The differentiator. This is the phase to validate with design partners.
 - Per-run cost capture
 - Opt-in telemetry
 
+**Delivery, alongside the above:**
+- **Image publishing**: tagged builds of `controlplane` and `worker` pushed to a registry (GHCR) on merge to `main` and on release — a design partner cannot pull and run something that only exists as source
+- **`semantic-release` goes live**, driven by the conventional commits already in place since Phase 0. One version for the whole monorepo, applied to every image tag — see [DELIVERY.md](DELIVERY.md) for why per-service versioning is rejected
+- Helm chart added alongside the images, since this is also the first phase a design partner might actually deploy the platform
+
 **Milestone** — demoable as *"governed agent access to the pipelines you already run."*
 
 **Verification**
-- Two tiers configured: auto-approve staging, production requires approval
+- Two tiers configured: `Autonomous` (acts unattended, no pre-approval) and `HumanInTheLoop` (a human approves each action before it executes) — tier is independent of environment, not "staging vs production" (see [SECURITY-MODEL.md](SECURITY-MODEL.md))
 - A human action and an agent action both traverse the full path correctly
 - The pipeline receives **tier-scoped** credentials via OIDC callback
 - **A denied tier fails closed** — the pipeline does not fall back to its own role
@@ -61,6 +76,8 @@ The differentiator. This is the phase to validate with design partners.
 - OIDC for human authentication
 - OPA as the custom-policy escape hatch
 - Extract the Apache 2.0 identity/audit library
+
+**Delivery, alongside the above:** the MCP server becomes a fourth image in the publishing pipeline — same version, same release, per decision 015. No change to the CI/CD design itself, since it was built for N services from Phase 1, not retrofitted for one.
 
 **Milestone** — an agent completes a PR-based change end to end via MCP: propose → policy check → human approves diff → merge → pipeline applies, fully reconstructable from the audit log.
 
@@ -130,7 +147,7 @@ A **monospace family is first-class, not an afterthought.** Role ARNs, run IDs, 
 
 1. **Approval queue with diffs** — the highest-stakes surface in the product. A human approving a production change is making a safety decision, often under time pressure. **Diff legibility is a safety property, not an aesthetic one**: if the approver cannot see what is changing at a glance, the governance model has a human-factors hole that no amount of policy enforcement closes. Design this first and hardest.
 2. **Audit and attribution views** — dense, high-volume tabular data. `layout` and `typeset` carry most of the weight; the job is making "who did what, under what authority" reconstructable at a glance.
-3. **Agent enrolment and management** — registering agents, setting tier and environment scope, rotating and revoking tokens. Enrolment is a **first-class UI workflow, not CLI-only**: the person authorising an agent is often a team lead who does not live in a terminal, and this belongs beside the approval and audit surfaces. The grant screen must state what authority is being given in plain language — nobody should have to infer what tier 2 means. See [AGENT-MODEL.md](AGENT-MODEL.md).
+3. **Agent enrolment and management** — registering agents, setting tier and environment scope, rotating and revoking tokens. Enrolment is a **first-class UI workflow, not CLI-only**: the person authorising an agent is often a team lead who does not live in a terminal, and this belongs beside the approval and audit surfaces. The grant screen must state what authority is being given in plain language — nobody should have to infer what `Autonomous` means from a bare number. See [AGENT-MODEL.md](AGENT-MODEL.md).
 4. **Catalog browser** — what exists, who owns it, what can be done to it.
 5. **Environment management** — role ARNs, tier configuration, connectivity status.
 6. **Cost views** — per-run, rolling up per actor.
@@ -157,6 +174,11 @@ Accessibility is frequently a procurement requirement for enterprise buyers, par
 - Native Terraform and Kubernetes executors, **only if the integration ceiling actually binds**
 - Optional Backstage plugin, so existing Backstage users adopt without migrating
 
+### Delivery in this phase
+
+- Frontend joins the same release: built, versioned and published (as a static asset bundle, or its own small serving image) at the same monorepo version as the backend services
+- Frontend-specific CI gates activate here: TypeScript strict-mode check, lint, and `impeccable audit` findings (a11y/perf/responsive) treated as blocking per [CLAUDE.md](../CLAUDE.md), not advisory
+
 ---
 
 ## Phase 4 — v1 GA
@@ -170,7 +192,7 @@ Accessibility is frequently a procurement requirement for enterprise buyers, par
 
 ## Deferred deliberately
 
-Secrets management · multi-cloud · real-time cost attribution · microVM sandboxing · general drift detection · CI adapters beyond GitHub Actions
+Secrets management · **GCP/Azure broker implementations** (the interface is generalised in Phase 0 per decision 017; the providers themselves are not built) · real-time cost attribution · microVM sandboxing · general drift detection · CI adapters beyond GitHub Actions
 
 Each is deferred for a stated reason in [SCOPE.md](SCOPE.md) or [ARCHITECTURE.md](ARCHITECTURE.md). Deferral is a decision, not an oversight.
 

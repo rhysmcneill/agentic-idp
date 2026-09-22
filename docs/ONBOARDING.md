@@ -14,7 +14,7 @@ The dependency chain is strict, and the first step exists because of a chicken-a
 5. Verify connectivity        (worker assumes each tier role)
 6. Create actors + teams      (humans, then agent identities)
 7. Wire one pipeline          (add our composite Action to one workflow)
-8. First governed run         (staging, tier 2, unattended)
+8. First governed run         (staging, Autonomous tier, unattended)
 ```
 
 Steps 1–5 are platform setup and happen once. Steps 6–8 repeat per team and per service.
@@ -89,7 +89,7 @@ Then agent identities. Each agent gets its own identity — **never a shared ser
 idpctl agent create \
   --name claude-code-rhys \
   --team platform \
-  --tier 2 \
+  --tier autonomous \
   --environments staging
 ```
 
@@ -114,7 +114,7 @@ Start with one non-production workflow. Do not ask anyone to convert their estat
 
 ## 8. First governed run
 
-Trigger a tier-2 staging deploy as an agent. Confirm in the audit log:
+Trigger an `Autonomous`-tier staging deploy as an agent. Confirm in the audit log:
 
 - The actor is the agent, with the delegation chain resolving to the granting human
 - Policy evaluated and allowed
@@ -122,7 +122,7 @@ Trigger a tier-2 staging deploy as an agent. Confirm in the audit log:
 - The pipeline received tier-scoped credentials, not its own role
 - The run reached a terminal state with cost attributed
 
-Then try the negative case: a tier-3 production action from the same agent should require approval, and a denied run should leave the pipeline **failing closed** rather than falling back to its own role.
+Then try the negative case: a `HumanInTheLoop` production action from the same agent should require approval, and a denied run should leave the pipeline **failing closed** rather than falling back to its own role.
 
 ---
 

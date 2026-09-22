@@ -45,7 +45,7 @@ More importantly, **the thesis collapses without production.** Trust tiers are m
 Two statements that are not in tension:
 
 - **Does the platform govern production changes?** Yes, necessarily. That is where the value is.
-- **Do agents deploy to production autonomously?** Almost never. Agents operate at tier 1–2 — unattended in staging. In production they may only *propose*; a human approves the diff.
+- **Do agents deploy to production autonomously?** Almost never. Agents typically operate at `ReadOnly`/`Autonomous` — unattended in staging. Reaching production means `HumanInTheLoop`: they may only *propose*; a human approves the diff.
 
 Staging-only is a legitimate **go-to-market wedge** — land somewhere low-risk, let the audit trail earn trust, expand. The architecture assumes production from day one regardless.
 

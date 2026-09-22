@@ -157,6 +157,25 @@ Non-obvious decisions baked into this:
 - **Log offset is an opaque `string`, not an int.** GitHub uses per-job cursors and serves completed logs as a zip; Jenkins uses byte offsets; GitLab uses ranges. An int would leak one provider's model into the interface.
 - **`Capabilities` rather than `ErrUnsupported` everywhere.** Atlantis has no trigger API and no cancel. The run engine needs to know before it schedules a poll loop or renders a UI affordance.
 
+## Cloud credential abstraction
+
+AWS is the only implemented provider in v1, but the credential-minting code is written behind a provider-agnostic interface from the start — the same pattern as `pkg/ci.Adapter` (decision 008), applied for the same reason.
+
+```go
+// pkg/cloud
+type Provider string // "aws" | "gcp" | "azure"
+
+type Broker interface {
+	Provider() Provider
+	ValidateEnvironment(ctx context.Context, cfg EnvironmentConfig) error
+	MintCredentials(ctx context.Context, cfg EnvironmentConfig, tier identity.Tier) (Credentials, error)
+}
+```
+
+`worker/internal/broker/aws` implements it. This is not full multi-cloud support — GCP and Azure remain deferred (see [V1-ROADMAP.md](V1-ROADMAP.md)) — but it means adding them later is additive rather than a rewrite of the AWS-specific code path.
+
+**Why this isn't a bigger v1 commitment.** AWS, GCP and Azure don't share an "assume role" primitive that a thin abstraction can paper over: `sts:AssumeRole` + external ID, GCP Workload Identity Federation + service account impersonation, and Azure Entra ID federated credentials + MSAL are three genuinely different credential mechanisms, with three different scoping primitives (AWS session policies vs. GCP IAM conditions vs. Azure subject-claim matching) and three different Kubernetes identity-mapping problems (EKS access entries vs. GKE Workload Identity bindings vs. AKS federated credentials — each is the reason decision 006 needed role-per-tier, restated in that provider's own terms). Implementing all three properly, including a real sandbox account per provider to test credential minting against, is roughly 2–3x the Phase 0/1 broker and onboarding work — not a linear extension. See decision 017.
+
 ## Execution strategy
 
 **v1 delegates to the customer's existing CI.** No Terraform state, locking, concurrency or drift handling on our side — the single largest build-cost saving available, and state management is precisely why Spacelift, env0, Scalr and HCP exist as companies.

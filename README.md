@@ -22,6 +22,7 @@ When a feature request arrives, that sentence is the test. See [SCOPE.md](docs/S
 | [AGENT-MODEL.md](docs/AGENT-MODEL.md) | How agents are enrolled, authenticated, scoped and used |
 | [SECURITY-MODEL.md](docs/SECURITY-MODEL.md) | Trust boundaries, credential handling, break-glass |
 | [V1-ROADMAP.md](docs/V1-ROADMAP.md) | Phases, milestones, deferred work, open decisions |
+| [DELIVERY.md](docs/DELIVERY.md) | CI/CD, Dockerfiles, image publishing, versioning — placed per phase |
 | [DECISIONS.md](docs/DECISIONS.md) | Numbered decision log with rationale |
 | [ONBOARDING.md](docs/ONBOARDING.md) | What a customer has to do to adopt this |
 

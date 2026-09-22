@@ -135,3 +135,37 @@ The ordering is driven by an asymmetry: **restrictive → permissive is easy; pe
 **Why.** Operate mode is the correct designation — the user is completing a task, so scanability, consistency and native expectations outrank expression. Naming the mode explicitly prevents a marketing aesthetic leaking into an approval queue. Running `init` early means later design work starts from real product truth rather than reconstructing it.
 
 **Consequence.** Colour must be treated as semantic and safety-critical, not decorative: policy outcomes, trust tiers, run states and human-vs-agent actor type are all colour-encoded, so state may never be conveyed by colour alone. A monospace family is first-class, since ARNs, run IDs, logs and diffs are primary content. The product name becomes a blocking prerequisite for brand work.
+
+---
+
+### 015 — One semver for the whole monorepo, not per-service versions
+
+**Decision.** A single version applies to every release and every image tag (`controlplane`, `worker`, `mcp`, and later `frontend`) — not independent versions per service, despite `semantic-release` supporting that mode.
+
+**Why.** [PLAN.md](PLAN.md) already accepts version sprawl as a cost of self-hosting: customers run whatever they installed, and several versions need simultaneous support. Per-service versioning would add a compatibility matrix on top of that — "does worker 2.1 talk to control-plane 1.9?" A self-hosted customer, and whoever supports them, should be able to name one version as a complete description of what's deployed.
+
+**Consequence.** A docs-only change to the frontend bumps the same number as a broker security fix. Accepted: the versioning scheme should not undermine the same legibility the product exists to sell.
+
+---
+
+### 016 — Trust tiers are named `ReadOnly` / `HumanInTheLoop` / `Autonomous`, in that order
+
+**Decision.** Tiers are renamed from environment-flavoured labels (`ReadOnly`/non-prod/prod) to autonomy-flavoured names, and — critically — **`Autonomous` outranks `HumanInTheLoop`**, not the reverse.
+
+**Why.** An earlier draft ordered them `ReadOnly(1) < Autonomous(2) < HumanInTheLoop(3)`, reasoning that `HumanInTheLoop` reaches the highest-stakes (production) actions. That was a real bug, not a style issue: the privilege-escalation check (`Issue` refuses to grant a tier higher than the issuer's own) would then let a `HumanInTheLoop` actor — one that never acts without a human checking it — mint an `Autonomous` agent that acts with **no check at all**. That launders supervised trust into unsupervised trust, which is exactly what the recursive-delegation ban in [AGENT-MODEL.md](AGENT-MODEL.md) exists to prevent, and the ordering let it straight through.
+
+The corrected model treats tier as a **ceiling of unsupervised trust**, not a ceiling of consequence reached: fully autonomous, auto-rollback continuous deployment is a *more* mature, more trusted state than manual-approval-gated deployment, not a lesser one — so `Autonomous(3) > HumanInTheLoop(2) > ReadOnly(1)` is the correct order on both the security argument and the DevOps-maturity argument.
+
+**Consequence.** `pkg/identity.Tier` constants and their doc comment were corrected, along with every doc reference (`SECURITY-MODEL.md`, `AGENT-MODEL.md`, `SCOPE.md`, `ONBOARDING.md`, `V1-ROADMAP.md`). Environment risk stays a separate, independent scope (`Claims.Environments` plus a per-environment policy setting) — a tier is never named after an environment.
+
+---
+
+### 017 — Cloud credential broker is a generic interface; only AWS ships in v1
+
+**Decision.** `worker/internal/broker` becomes `worker/internal/broker/aws`, implementing a new provider-agnostic `pkg/cloud.Broker` interface. GCP and Azure implementations remain deferred — the interface exists now, the code behind it does not.
+
+**Why.** Raised as "should v1 support Azure/GCP too, since Phase 0's issue is AWS-STS-specific." The two providers don't share AWS's `sts:AssumeRole` + external ID primitive: GCP uses Workload Identity Federation with service account impersonation, Azure uses Entra ID federated credentials with MSAL, each with its own scoping mechanism (session policies vs. IAM conditions vs. subject-claim matching) and its own version of the EKS-access-entries problem that motivated decision 006 (GKE Workload Identity bindings, AKS federated credentials). Implementing both properly — including a real sandbox account per provider to test credential minting — is roughly 2–3x the Phase 0/1 broker and onboarding work, not a linear extension, and works directly against the roadmap's stated priority of reaching a Phase 1 demo quickly. No design partner or use case currently requires GCP or Azure.
+
+Generalising the interface now costs almost nothing beyond what Phase 0 already requires — the same reasoning as decision 008's `pkg/ci.Adapter` — and converts a future multi-cloud push from a rewrite into an additive `broker/gcp`/`broker/azure` package.
+
+**Consequence.** `pkg/cloud` must stay free of AWS-specific assumptions (ARNs, session policies) in its interface shape. Revisit real GCP/Azure implementation only when a specific customer need exists.

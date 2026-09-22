@@ -12,6 +12,7 @@ agentic-idp/
     ci/                         # generic CI adapter interface (GitHub Actions is the only impl)
     identity/                   # actor model, token-bound delegation claims
     ciauth/                     # CI OIDC token verification (JWKS, claim checking)
+    cloud/                      # generic cloud credential broker interface (AWS is the only impl)
 
   controlplane/                 # API and control plane — holds NO cloud credentials
     cmd/server/
@@ -35,7 +36,9 @@ agentic-idp/
   worker/                       # customer-deployed; the ONLY component holding cloud credentials
     cmd/worker/
     internal/
-      broker/                   # the only caller of sts:AssumeRole; mints tier-scoped credentials
+      broker/
+        aws/                    # the only caller of sts:AssumeRole; mints tier-scoped credentials
+        # gcp/ azure/ — deferred, see docs/DECISIONS.md 017
       ciauth/                   # receives pipeline OIDC callbacks, verifies, mints via broker
       executors/
         pipeline/
@@ -88,7 +91,7 @@ It is deployed as its own pod/container, not embedded in the control plane, beca
 
 This layout encodes the security model, and the placement is deliberate rather than incidental.
 
-- `worker/internal/broker/` is the **only** code that calls `sts:AssumeRole`. Nothing outside the worker mints cloud credentials.
+- `worker/internal/broker/aws/` is the **only** code that calls `sts:AssumeRole`. Nothing outside the worker mints cloud credentials. It implements the provider-agnostic `pkg/cloud.Broker` interface (see [ARCHITECTURE.md](ARCHITECTURE.md)) so GCP/Azure brokers are additive later rather than a rewrite — but only the AWS implementation ships in v1.
 - `worker/internal/ciauth/` receives OIDC callbacks **from the customer's pipelines**, not from the internet. The worker sits in their account alongside their CI, so this is an internal boundary.
 - `pkg/ciauth/` holds only the stateless parts — JWKS fetching, signature verification, claim checking — so they are shared and independently testable. It mints nothing.
 - `controlplane/` answers *"is correlation X authorised, and at what tier?"* It never sees a cloud credential.
