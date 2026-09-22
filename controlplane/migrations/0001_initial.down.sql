@@ -1,0 +1,9 @@
+DROP TABLE revoked_sessions;
+DROP TABLE audit_events;
+DROP TABLE environment_aws_tier_roles;
+DROP TABLE environment_aws_config;
+DROP TABLE actor_environments;
+DROP TABLE actors;
+DROP TABLE environments;
+DROP TABLE teams;
+DROP TABLE tenants;

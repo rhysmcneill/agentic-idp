@@ -111,7 +111,8 @@ func TestExpiredTokenRejected(t *testing.T) {
 	}
 }
 
-// An actor cannot grant a tier higher than its own — see docs/AGENT-MODEL.md.
+// An actor cannot grant a tier higher than its own, or recursive delegation
+// could launder authority an actor never actually held.
 func TestIssueRejectsPrivilegeEscalation(t *testing.T) {
 	issuer, _ := newTestPair(t)
 

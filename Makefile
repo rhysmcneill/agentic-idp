@@ -13,7 +13,8 @@ TAG ?= $(shell git rev-parse --abbrev-ref HEAD | tr '/' '-')-$(COMMIT)
 
 .PHONY: build build-controlplane build-worker build-cli build-mcp \
 	docker-build-controlplane docker-build-worker docker-build-mcp docker-build-frontend \
-	publish test test-cover fmt fmt-check vet lint setup pre-commit-hooks-update ci
+	publish test test-cover fmt fmt-check vet lint generate generate-check \
+	setup pre-commit-hooks-update ci
 
 # ── build-* : compile a Go binary (go build, no Docker) ─────────────────────
 # Output goes to bin/. Fast inner dev loop: compiling, running a binary
@@ -81,6 +82,19 @@ vet:
 lint:
 	golangci-lint run
 
+# ── Codegen (sqlc) ───────────────────────────────────────────────────────────
+# Query files under internal/<domain>/queries/*.sql are the source of truth;
+# internal/<domain>/sqlcgen/ is generated and must never be hand-edited.
+
+generate:
+	sqlc generate
+
+# Fails if the committed sqlcgen/ output doesn't match what queries/*.sql and
+# the schema would generate — catches a query change committed without
+# re-running `make generate`.
+generate-check:
+	sqlc diff
+
 # ── Developer setup ────────────────────────────────────────────────────────────
 
 # Install development tooling. Run once after cloning.
@@ -88,6 +102,9 @@ setup:
 	GOTOOLCHAIN=local go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 	go install golang.org/x/tools/cmd/goimports@latest
 	go install github.com/securego/gosec/v2/cmd/gosec@latest
+	@if ! command -v sqlc >/dev/null 2>&1; then \
+		echo "sqlc not found — install via 'brew install sqlc' (see https://docs.sqlc.dev/en/latest/overview/install.html), then re-run 'make setup'"; \
+	fi
 	@if command -v pre-commit >/dev/null 2>&1; then \
 		pre-commit install; \
 		pre-commit install --hook-type commit-msg; \
@@ -104,4 +121,4 @@ pre-commit-hooks-update:
 # Full local CI check — mirrors what the CI workflow runs on PRs. Native
 # build only; the docker-build-* targets are exercised by CI's separate
 # image-publishing job (from Phase 1 on), not this composite.
-ci: fmt-check vet lint test build
+ci: fmt-check vet lint generate-check test build

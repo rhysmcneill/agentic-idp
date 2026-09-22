@@ -1,0 +1,57 @@
+version: "2"
+sql:
+  - schema: "controlplane/migrations/*.up.sql"
+    queries: "controlplane/internal/tenant/queries"
+    engine: "postgresql"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "controlplane/internal/tenant/sqlcgen"
+        sql_package: "database/sql"
+        emit_json_tags: true
+        emit_interface: true
+        emit_exact_table_names: false
+  - schema: "controlplane/migrations/*.up.sql"
+    queries: "controlplane/internal/team/queries"
+    engine: "postgresql"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "controlplane/internal/team/sqlcgen"
+        sql_package: "database/sql"
+        emit_json_tags: true
+        emit_interface: true
+        emit_exact_table_names: false
+  - schema: "controlplane/migrations/*.up.sql"
+    queries: "controlplane/internal/actor/queries"
+    engine: "postgresql"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "controlplane/internal/actor/sqlcgen"
+        sql_package: "database/sql"
+        emit_json_tags: true
+        emit_interface: true
+        emit_exact_table_names: false
+  - schema: "controlplane/migrations/*.up.sql"
+    queries: "controlplane/internal/environment/queries"
+    engine: "postgresql"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "controlplane/internal/environment/sqlcgen"
+        sql_package: "database/sql"
+        emit_json_tags: true
+        emit_interface: true
+        emit_exact_table_names: false
+  - schema: "controlplane/migrations/*.up.sql"
+    queries: "controlplane/internal/audit/queries"
+    engine: "postgresql"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "controlplane/internal/audit/sqlcgen"
+        sql_package: "database/sql"
+        emit_json_tags: true
+        emit_interface: true
+        emit_exact_table_names: false
