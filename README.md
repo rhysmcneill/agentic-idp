@@ -19,6 +19,7 @@ When a feature request arrives, that sentence is the test. See [SCOPE.md](docs/S
 | [PLAN.md](docs/PLAN.md) | Problem, competitive position, business model, licensing |
 | [SCOPE.md](docs/SCOPE.md) | What this is and is not; responsibility split; non-goals |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, data model, key flows, CI adapter design |
+| [DATA-MODEL.md](docs/DATA-MODEL.md) | Table-level DB schema: columns, constraints, per-provider split |
 | [AGENT-MODEL.md](docs/AGENT-MODEL.md) | How agents are enrolled, authenticated, scoped and used |
 | [SECURITY-MODEL.md](docs/SECURITY-MODEL.md) | Trust boundaries, credential handling, break-glass |
 | [V1-ROADMAP.md](docs/V1-ROADMAP.md) | Phases, milestones, deferred work, open decisions |

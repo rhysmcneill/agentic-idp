@@ -56,7 +56,7 @@ Every component reaches the same governed service layer through the control plan
 
 ## Data model
 
-Core entities and the relations that matter:
+Core entities and the relations that matter. See [DATA-MODEL.md](DATA-MODEL.md) for the table-level design (columns, constraints, per-provider split).
 
 - `Tenant` — present from the first migration even though v1 ships self-hosted single-tenant. Retrofitting it is expensive; carrying it is nearly free.
 - `Team` — catalog entries need owners and approvals need somewhere to route. Actors and tenants alone are insufficient.
