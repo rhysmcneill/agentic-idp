@@ -7,7 +7,10 @@
 // Security invariants and docs/DECISIONS.md 005.
 package identity
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // ActorType distinguishes a human from an agent actor.
 type ActorType string
@@ -53,8 +56,13 @@ type Delegation struct {
 // ever produced by Verify; nothing else in this package or its callers should
 // construct one from unverified input.
 type Claims struct {
-	TenantID     string      `json:"tenant_id"`
-	ActorID      string      `json:"actor_id"`
+	TenantID string `json:"tenant_id"`
+	ActorID  string `json:"actor_id"`
+
+	// Jti identifies this session, distinct from ActorID — it's what lets one
+	// compromised session be revoked without disabling the actor everywhere.
+	Jti string `json:"jti"`
+
 	ActorType    ActorType   `json:"actor_type"`
 	Tier         Tier        `json:"tier"`
 	Environments []string    `json:"environments"`
@@ -62,6 +70,16 @@ type Claims struct {
 
 	IssuedAt  time.Time `json:"issued_at"`
 	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// RevocationChecker reports whether a session is no longer valid despite
+// carrying a still-cryptographically-valid signature and expiry — either
+// because this specific session (jti) was revoked, or because the actor's
+// whole identity was. Defined here, not in terms of a DB driver, so this
+// package stays free of a Postgres dependency; the control plane wires a
+// Postgres-backed implementation, a test wires a fake.
+type RevocationChecker interface {
+	IsRevoked(ctx context.Context, actorID, jti string) (bool, error)
 }
 
 // PermitsEnvironment reports whether the actor's token scopes it to env.

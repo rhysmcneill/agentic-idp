@@ -1,12 +1,19 @@
 package identity
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 )
+
+// notRevoked is a RevocationChecker fake for tests that don't exercise
+// revocation itself.
+type notRevoked struct{}
+
+func (notRevoked) IsRevoked(context.Context, string, string) (bool, error) { return false, nil }
 
 func newTestPair(t *testing.T) (*Issuer, *Verifier) {
 	t.Helper()
@@ -33,7 +40,7 @@ func TestIssueVerifyRoundTrip(t *testing.T) {
 		t.Fatalf("Issue: %v", err)
 	}
 
-	claims, err := verifier.Verify(tok)
+	claims, err := verifier.Verify(context.Background(), tok, notRevoked{})
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -41,11 +48,42 @@ func TestIssueVerifyRoundTrip(t *testing.T) {
 	if claims.ActorID != "claude-code-rhys" || claims.TenantID != "tenant-1" {
 		t.Errorf("unexpected claims: %+v", claims)
 	}
+	if claims.Jti == "" {
+		t.Error("Jti was not populated")
+	}
 	if claims.Delegation == nil || claims.Delegation.AuthorizedBy != "rhys" {
 		t.Errorf("delegation not preserved: %+v", claims.Delegation)
 	}
 	if !claims.PermitsEnvironment("staging") || claims.PermitsEnvironment("prod") {
 		t.Errorf("environment scoping wrong: %+v", claims.Environments)
+	}
+}
+
+func TestIssueGeneratesDistinctJti(t *testing.T) {
+	issuer, verifier := newTestPair(t)
+
+	req := IssueRequest{TenantID: "tenant-1", ActorID: "a1", ActorType: ActorAgent, Tier: TierHumanInTheLoop, TTL: time.Minute}
+
+	tok1, err := issuer.Issue(req, TierAutonomous)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	tok2, err := issuer.Issue(req, TierAutonomous)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	c1, err := verifier.Verify(context.Background(), tok1, notRevoked{})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	c2, err := verifier.Verify(context.Background(), tok2, notRevoked{})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+
+	if c1.Jti == c2.Jti {
+		t.Errorf("two Issue calls produced the same jti: %q", c1.Jti)
 	}
 }
 
@@ -65,7 +103,7 @@ func TestDelegationCannotBeForgedOutsideIssue(t *testing.T) {
 	_, verifier := newTestPair(t)
 	// A raw, unsigned claims payload — what an attacker controlling a request
 	// body would send — must not verify.
-	if _, err := verifier.Verify(string(b)); err == nil {
+	if _, err := verifier.Verify(context.Background(), string(b), notRevoked{}); err == nil {
 		t.Fatal("unsigned/forged payload verified successfully")
 	}
 }
@@ -88,7 +126,7 @@ func TestTamperedTokenRejected(t *testing.T) {
 	// Flip the payload segment without re-signing.
 	tampered := parts[0] + "." + parts[1] + "x" + "." + parts[2]
 
-	if _, err := verifier.Verify(tampered); !errors.Is(err, ErrTokenInvalid) {
+	if _, err := verifier.Verify(context.Background(), tampered, notRevoked{}); !errors.Is(err, ErrTokenInvalid) {
 		t.Errorf("got %v, want ErrTokenInvalid", err)
 	}
 }
@@ -106,7 +144,7 @@ func TestExpiredTokenRejected(t *testing.T) {
 
 	time.Sleep(5 * time.Millisecond)
 
-	if _, err := verifier.Verify(tok); !errors.Is(err, ErrTokenExpired) {
+	if _, err := verifier.Verify(context.Background(), tok, notRevoked{}); !errors.Is(err, ErrTokenExpired) {
 		t.Errorf("got %v, want ErrTokenExpired", err)
 	}
 }
@@ -155,7 +193,7 @@ func TestVerifyRejectsWrongKey(t *testing.T) {
 		t.Fatalf("Issue: %v", err)
 	}
 
-	if _, err := otherVerifier.Verify(tok); err == nil {
+	if _, err := otherVerifier.Verify(context.Background(), tok, notRevoked{}); err == nil {
 		t.Fatal("token verified against the wrong key pair")
 	}
 }
@@ -179,5 +217,65 @@ func TestIssueValidatesRequest(t *testing.T) {
 				t.Errorf("got %v, want ErrInvalidRequest", err)
 			}
 		})
+	}
+}
+
+func TestVerifyRequiresRevocationChecker(t *testing.T) {
+	issuer, verifier := newTestPair(t)
+
+	tok, err := issuer.Issue(IssueRequest{
+		TenantID: "tenant-1", ActorID: "a1", ActorType: ActorAgent,
+		Tier: TierHumanInTheLoop, TTL: time.Minute,
+	}, TierAutonomous)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	if _, err := verifier.Verify(context.Background(), tok, nil); err == nil {
+		t.Fatal("Verify with a nil RevocationChecker: want error, got nil")
+	}
+}
+
+// fakeChecker lets a test control IsRevoked's return value directly, unlike
+// notRevoked which is fixed to "never revoked".
+type fakeChecker struct {
+	revoked bool
+	err     error
+}
+
+func (f fakeChecker) IsRevoked(context.Context, string, string) (bool, error) {
+	return f.revoked, f.err
+}
+
+func TestVerifyRejectsRevokedSession(t *testing.T) {
+	issuer, verifier := newTestPair(t)
+
+	tok, err := issuer.Issue(IssueRequest{
+		TenantID: "tenant-1", ActorID: "a1", ActorType: ActorAgent,
+		Tier: TierHumanInTheLoop, TTL: time.Minute,
+	}, TierAutonomous)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	if _, err := verifier.Verify(context.Background(), tok, fakeChecker{revoked: true}); !errors.Is(err, ErrTokenRevoked) {
+		t.Errorf("got %v, want ErrTokenRevoked", err)
+	}
+}
+
+func TestVerifyPropagatesRevocationCheckerError(t *testing.T) {
+	issuer, verifier := newTestPair(t)
+
+	tok, err := issuer.Issue(IssueRequest{
+		TenantID: "tenant-1", ActorID: "a1", ActorType: ActorAgent,
+		Tier: TierHumanInTheLoop, TTL: time.Minute,
+	}, TierAutonomous)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	checkerErr := errors.New("database is down")
+	if _, err := verifier.Verify(context.Background(), tok, fakeChecker{err: checkerErr}); !errors.Is(err, checkerErr) {
+		t.Errorf("got %v, want it to wrap %v", err, checkerErr)
 	}
 }

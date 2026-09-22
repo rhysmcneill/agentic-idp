@@ -14,6 +14,10 @@ var (
 	// ErrTokenExpired is returned by Verify when the token's ExpiresAt has passed.
 	ErrTokenExpired = errors.New("identity: token expired")
 
+	// ErrTokenRevoked is returned by Verify when the RevocationChecker reports
+	// this session, or the actor as a whole, as revoked.
+	ErrTokenRevoked = errors.New("identity: token revoked")
+
 	// ErrPrivilegeEscalation is returned by Issue when the issuing actor
 	// attempts to grant a tier higher than its own. See docs/AGENT-MODEL.md:
 	// an actor may never grant more authority than it holds.

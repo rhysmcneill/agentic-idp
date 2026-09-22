@@ -282,7 +282,7 @@ Per-run cost capture, rolling up per actor in the Phase 3b cost views — the ro
    | `revoked_at` | `timestamptz` NOT NULL DEFAULT `now()` | |
    | `expires_at` | `timestamptz` NOT NULL | copied from the token's own `exp` — a revocation row has no reason to outlive the token it revokes |
 
-   A row here means "reject this session's token even though the signature and `exp` are still valid." Prune rows once `expires_at` has passed — the underlying token would be rejected on expiry alone by then.
+   A row here means "reject this session's token even though the signature and `exp` are still valid." Prune rows once `expires_at` has passed — the underlying token would be rejected on expiry alone by then. `controlplane/internal/session` exposes this pruning as a `DeleteExpired` capability; nothing calls it periodically yet, since no scheduler exists until `cmd/server` does — wiring a periodic call is part of that work, not deferred indefinitely.
 
 3. **Two independent revocation checks at verify time**, both cheap single-row lookups (and both cacheable with a short TTL if verification latency matters — an eventually-consistent cache is an acceptable trade specifically because both checks only ever *narrow* a still-cryptographically-valid token, never widen one):
    - `actors.status = 'revoked'` — kills every session for that actor at once (whole-identity revocation).
