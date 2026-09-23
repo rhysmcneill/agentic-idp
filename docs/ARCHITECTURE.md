@@ -176,6 +176,59 @@ type Broker interface {
 
 **Why this isn't a bigger v1 commitment.** AWS, GCP and Azure don't share an "assume role" primitive that a thin abstraction can paper over: `sts:AssumeRole` + external ID, GCP Workload Identity Federation + service account impersonation, and Azure Entra ID federated credentials + MSAL are three genuinely different credential mechanisms, with three different scoping primitives (AWS session policies vs. GCP IAM conditions vs. Azure subject-claim matching) and three different Kubernetes identity-mapping problems (EKS access entries vs. GKE Workload Identity bindings vs. AKS federated credentials — each is the reason decision 006 needed role-per-tier, restated in that provider's own terms). Implementing all three properly, including a real sandbox account per provider to test credential minting against, is roughly 2–3x the Phase 0/1 broker and onboarding work — not a linear extension. See decision 017.
 
+### Connectivity check
+
+The Phase 0 milestone in one flow: an actor triggers a check, the worker actually calls `sts:AssumeRole` for each tier, and the result comes back via the same request-a-job/poll-for-a-result *shape* as the "Run model" above — trigger, async completion, poll — but deliberately **not** the same mechanism: the Phase 1 run state machine and Postgres-backed job queue don't exist yet ([V1-ROADMAP.md](V1-ROADMAP.md) puts them in Phase 1), so this uses its own small, single-purpose `environment_verifications` table rather than pulling that forward early. `POST /v1/environments/{name}/verify` and `GET /v1/environments/{name}/verifications/{id}` are plain authenticated REST endpoints; `idpctl environment verify` is their only client today, but a Phase 3 UI surface ("Environment management — connectivity status", [V1-ROADMAP.md](V1-ROADMAP.md)) becomes a second client of the same two endpoints, the way the Phase 3 setup UI reuses `POST /v1/setup` rather than getting its own mechanism.
+
+```
+Operator client (idpctl today, UI Phase 3)
+        │
+        │ 1  POST /v1/environments/{name}/verify
+        │    Authorization: Bearer <human/agent token>
+        ▼
+┌───────────────────────────────────────────┐
+│               Control plane                │
+│  environment_verifications row created,     │
+│  status = pending                           │
+└───────────────────▲─────────────────────────┘
+                     │
+                     │ 2  GET /v1/worker/verifications/next
+                     │    Authorization: Bearer <worker credential>
+                     │    checked by requireWorkerAuth, not
+                     │    identity.Verifier — see decision 019
+                     │    and SECURITY-MODEL.md
+                     │
+┌────────────────────┴─────────────────────────┐
+│  claims oldest pending row (FOR UPDATE SKIP    │
+│  LOCKED), returns the job plus the             │
+│  environment's AWS config (account_ref,        │
+│  external_id, trust_anchor, role ARNs)         │
+└────────────────────┬───────────────────────────┘
+                      ▼
+┌────────────────────────────────────────────────────────────┐
+│              Customer AWS account — Worker                  │
+│  3  for each tier: broker/aws.MintCredentials(cfg, tier)     │
+│         └─ sts:AssumeRole ─► customer IAM role               │
+│     record {ok, error} per tier — no fallback to a broader   │
+│     role if one tier's AssumeRole fails                      │
+└──────────────────────────┬────────────────────────────────────┘
+                            │
+                            │ 4  POST /v1/worker/verifications/{id}/result
+                            │    Authorization: Bearer <worker credential>
+                            ▼
+                 ┌─────────────────────────────┐
+                 │        Control plane         │
+                 │  status → succeeded/failed   │
+                 │  audit_events: environment.  │
+                 │  verify.completed            │
+                 └───────────────▲───────────────┘
+                                 │
+                                 │ 5  GET /v1/environments/{name}/verifications/{id}
+                                 │    Authorization: Bearer <human/agent token>
+                                 │
+                     Operator client polls/renders the result
+```
+
 ## Execution strategy
 
 **v1 delegates to the customer's existing CI.** No Terraform state, locking, concurrency or drift handling on our side — the single largest build-cost saving available, and state management is precisely why Spacelift, env0, Scalr and HCP exist as companies.
@@ -195,5 +248,5 @@ Native `TerraformExecutor` and `K8sExecutor` are additive behind the same interf
 | Database | PostgreSQL | |
 | Frontend | React + TypeScript (Vite) | Phase 3 |
 | Deployment | Helm, Docker Compose, single worker binary | |
-| Human auth | Static admin token (dev) → OIDC (Phase 2) | |
+| Human auth | Operator-set local admin (`idpctl setup`) → OIDC (Phase 2) | See [Decision 018](DECISIONS.md) |
 | Agent auth | Short-lived tokens with bound delegation claims | |

@@ -29,8 +29,9 @@ type Store struct {
 	q *sqlcgen.Queries
 }
 
-// NewStore constructs a Store over an open database connection.
-func NewStore(db *sql.DB) *Store {
+// NewStore constructs a Store over db, which may be a *sql.DB for normal use
+// or a *sql.Tx to compose with other stores inside one transaction.
+func NewStore(db sqlcgen.DBTX) *Store {
 	return &Store{q: sqlcgen.New(db)}
 }
 
@@ -57,6 +58,16 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (Tenant, error) {
 		return Tenant{}, fmt.Errorf("tenant: get: %w", err)
 	}
 	return fromRow(row), nil
+}
+
+// AnyExists reports whether any tenant has been created yet — the guard
+// POST /v1/setup uses to refuse running more than once.
+func (s *Store) AnyExists(ctx context.Context) (bool, error) {
+	exists, err := s.q.AnyTenantExists(ctx)
+	if err != nil {
+		return false, fmt.Errorf("tenant: any exists: %w", err)
+	}
+	return exists, nil
 }
 
 func fromRow(row sqlcgen.Tenant) Tenant {

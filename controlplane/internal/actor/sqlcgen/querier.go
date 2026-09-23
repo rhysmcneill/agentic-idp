@@ -13,6 +13,9 @@ import (
 type Querier interface {
 	CreateActor(ctx context.Context, arg CreateActorParams) (Actor, error)
 	GetActor(ctx context.Context, id uuid.UUID) (Actor, error)
+	GetActorByIdempotencyKey(ctx context.Context, arg GetActorByIdempotencyKeyParams) (Actor, error)
+	GrantActorEnvironment(ctx context.Context, arg GrantActorEnvironmentParams) error
+	ListActorEnvironments(ctx context.Context, actorID uuid.UUID) ([]uuid.UUID, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -58,8 +58,9 @@ type Store struct {
 	q *sqlcgen.Queries
 }
 
-// NewStore constructs a Store over an open database connection.
-func NewStore(db *sql.DB) *Store {
+// NewStore constructs a Store over db, which may be a *sql.DB for normal use
+// or a *sql.Tx to compose with other stores inside one transaction.
+func NewStore(db sqlcgen.DBTX) *Store {
 	return &Store{q: sqlcgen.New(db)}
 }
 

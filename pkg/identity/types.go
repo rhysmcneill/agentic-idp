@@ -9,6 +9,7 @@ package identity
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -45,6 +46,36 @@ const (
 
 // Valid reports whether t is one of the defined tiers.
 func (t Tier) Valid() bool { return t >= TierReadOnly && t <= TierAutonomous }
+
+// String returns t's canonical name, used wherever a tier crosses a wire
+// boundary as a string rather than a smallint (API request/response bodies,
+// CLI flags): "read_only", "human_in_the_loop", "autonomous".
+func (t Tier) String() string {
+	switch t {
+	case TierReadOnly:
+		return "read_only"
+	case TierHumanInTheLoop:
+		return "human_in_the_loop"
+	case TierAutonomous:
+		return "autonomous"
+	default:
+		return fmt.Sprintf("tier(%d)", int(t))
+	}
+}
+
+// ParseTier parses a tier's canonical name, the inverse of String.
+func ParseTier(s string) (Tier, error) {
+	switch s {
+	case "read_only":
+		return TierReadOnly, nil
+	case "human_in_the_loop":
+		return TierHumanInTheLoop, nil
+	case "autonomous":
+		return TierAutonomous, nil
+	default:
+		return 0, fmt.Errorf("%w: %q", ErrUnknownTierName, s)
+	}
+}
 
 // Delegation identifies who authorised an agent to act, fixed at Issue time.
 type Delegation struct {

@@ -54,8 +54,9 @@ type Store struct {
 	q *sqlcgen.Queries
 }
 
-// NewStore constructs a Store over an open database connection.
-func NewStore(db *sql.DB) *Store {
+// NewStore constructs a Store over db, which may be a *sql.DB for normal use
+// or a *sql.Tx to compose with other stores inside one transaction.
+func NewStore(db sqlcgen.DBTX) *Store {
 	return &Store{q: sqlcgen.New(db)}
 }
 
@@ -91,6 +92,23 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (Environment, error) {
 	}
 	if err != nil {
 		return Environment{}, fmt.Errorf("environment: get: %w", err)
+	}
+	return fromRow(row), nil
+}
+
+// GetByName returns the environment named name within tenantID, or
+// ErrNotFound. Used to resolve an operator-supplied environment name (e.g.
+// "staging") at agent enrolment time.
+func (s *Store) GetByName(ctx context.Context, tenantID uuid.UUID, name string) (Environment, error) {
+	row, err := s.q.GetEnvironmentByName(ctx, sqlcgen.GetEnvironmentByNameParams{
+		TenantID: tenantID,
+		Name:     name,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return Environment{}, ErrNotFound
+	}
+	if err != nil {
+		return Environment{}, fmt.Errorf("environment: get by name: %w", err)
 	}
 	return fromRow(row), nil
 }

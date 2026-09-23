@@ -17,6 +17,7 @@ type Querier interface {
 	GetEnvironment(ctx context.Context, id uuid.UUID) (Environment, error)
 	GetEnvironmentAWSConfig(ctx context.Context, environmentID uuid.UUID) (EnvironmentAwsConfig, error)
 	GetEnvironmentAWSTierRole(ctx context.Context, arg GetEnvironmentAWSTierRoleParams) (EnvironmentAwsTierRole, error)
+	GetEnvironmentByName(ctx context.Context, arg GetEnvironmentByNameParams) (Environment, error)
 }
 
 var _ Querier = (*Queries)(nil)

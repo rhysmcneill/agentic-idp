@@ -7,7 +7,7 @@ The security model *is* the product. A customer's security review will ask for t
 | Boundary | What crosses it | What we assume |
 |---|---|---|
 | Agent → control plane | Agent token | Token is verifiable; **its claims are trusted, the request body is not** |
-| Control plane → worker | Job instructions | Worker authenticates; connection is outbound-only from the worker |
+| Control plane → worker | Job instructions | Worker authenticates with its own hashed bearer credential, scoped to environments — not an actor token; connection is outbound-only from the worker |
 | Worker → AWS | `sts:AssumeRole` | Role and external ID were registered by an authorised human |
 | Worker → CI | Trigger + correlation ID | CI is customer-operated and semi-trusted |
 | CI → control plane | CI OIDC token | Token is verified against the provider's JWKS; **claims decide, not assertions** |
@@ -62,6 +62,18 @@ Credentials are scoped by using **a distinct IAM role per tier**, not one role n
 - Every mint is an audited event recording the actor, the action it was minted for, the granted scope and the TTL.
 - Cross-account trust uses an **external ID per environment** — standard confused-deputy mitigation.
 - The trust anchor is **configuration, not hardcoded**: self-hosted uses the customer's own instance identity (instance profile / IRSA); a future hosted offering would use our account ID with a mandatory external ID.
+
+## Worker authentication to the control plane
+
+The worker is not an actor. `identity.Claims` (`Tier`, `Team`, `Delegation`) answers "how much unsupervised authority does this principal have to decide and take an action, and on whose behalf" — a question that doesn't apply to the worker, which never decides anything. It only polls for jobs another actor already had authorised, executes exactly that, and reports facts back. See [Decision 019](DECISIONS.md).
+
+Its actual trust question is narrower and flatter: **is this the registered worker for one of these environments?** That's answered by its own mechanism, entirely separate from `identity.Issuer`/`Verifier`:
+
+- `idpctl worker enrol --environments staging,prod` mints a high-entropy opaque bearer token, shown once, and stores only a SHA-256 hash of it (`worker_credentials`) — not bcrypt: unlike the admin's bcrypt-hashed password in `controlplane/internal/credential` (decision 018), a bearer token carries no separate identifier (a username) to find its row by first, so it needs a deterministic, directly-indexable hash. The token's own entropy stands in for a salt.
+- A separate `requireWorkerAuth` middleware hashes the presented token and looks it up directly. It never touches `identity.Verifier`, and it gates only the worker-facing endpoints (poll for a job, report a result) — never a route `requireAuth` also serves.
+- The credential carries an environment scope, not a tier: the worker can only claim and report on verification jobs for environments it was granted, mirroring `actor_environments`' shape without inheriting its actor semantics.
+
+This keeps the two auth mechanisms honest rather than overloading one to mean different things for different callers: `identity.Claims` for actors that take governed actions, `worker_credentials` for the worker proving it's the legitimate poller for a customer's environments.
 
 ## The CI boundary — the hole and the fix
 

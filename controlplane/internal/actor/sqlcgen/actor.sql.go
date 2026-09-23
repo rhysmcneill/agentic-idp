@@ -13,19 +13,20 @@ import (
 )
 
 const createActor = `-- name: CreateActor :one
-INSERT INTO actors (tenant_id, type, name, team_id, trust_tier, authorized_by, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, tenant_id, type, name, team_id, trust_tier, authorized_by, status, expires_at, created_at, revoked_at
+INSERT INTO actors (tenant_id, type, name, team_id, trust_tier, authorized_by, expires_at, idempotency_key)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, tenant_id, type, name, team_id, trust_tier, authorized_by, status, expires_at, created_at, revoked_at, idempotency_key
 `
 
 type CreateActorParams struct {
-	TenantID     uuid.UUID     `json:"tenant_id"`
-	Type         string        `json:"type"`
-	Name         string        `json:"name"`
-	TeamID       uuid.UUID     `json:"team_id"`
-	TrustTier    int16         `json:"trust_tier"`
-	AuthorizedBy uuid.NullUUID `json:"authorized_by"`
-	ExpiresAt    sql.NullTime  `json:"expires_at"`
+	TenantID       uuid.UUID      `json:"tenant_id"`
+	Type           string         `json:"type"`
+	Name           string         `json:"name"`
+	TeamID         uuid.UUID      `json:"team_id"`
+	TrustTier      int16          `json:"trust_tier"`
+	AuthorizedBy   uuid.NullUUID  `json:"authorized_by"`
+	ExpiresAt      sql.NullTime   `json:"expires_at"`
+	IdempotencyKey sql.NullString `json:"idempotency_key"`
 }
 
 func (q *Queries) CreateActor(ctx context.Context, arg CreateActorParams) (Actor, error) {
@@ -37,6 +38,7 @@ func (q *Queries) CreateActor(ctx context.Context, arg CreateActorParams) (Actor
 		arg.TrustTier,
 		arg.AuthorizedBy,
 		arg.ExpiresAt,
+		arg.IdempotencyKey,
 	)
 	var i Actor
 	err := row.Scan(
@@ -51,12 +53,13 @@ func (q *Queries) CreateActor(ctx context.Context, arg CreateActorParams) (Actor
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.RevokedAt,
+		&i.IdempotencyKey,
 	)
 	return i, err
 }
 
 const getActor = `-- name: GetActor :one
-SELECT id, tenant_id, type, name, team_id, trust_tier, authorized_by, status, expires_at, created_at, revoked_at FROM actors WHERE id = $1
+SELECT id, tenant_id, type, name, team_id, trust_tier, authorized_by, status, expires_at, created_at, revoked_at, idempotency_key FROM actors WHERE id = $1
 `
 
 func (q *Queries) GetActor(ctx context.Context, id uuid.UUID) (Actor, error) {
@@ -74,6 +77,78 @@ func (q *Queries) GetActor(ctx context.Context, id uuid.UUID) (Actor, error) {
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.RevokedAt,
+		&i.IdempotencyKey,
 	)
 	return i, err
+}
+
+const getActorByIdempotencyKey = `-- name: GetActorByIdempotencyKey :one
+SELECT id, tenant_id, type, name, team_id, trust_tier, authorized_by, status, expires_at, created_at, revoked_at, idempotency_key FROM actors WHERE tenant_id = $1 AND authorized_by = $2 AND idempotency_key = $3
+`
+
+type GetActorByIdempotencyKeyParams struct {
+	TenantID       uuid.UUID      `json:"tenant_id"`
+	AuthorizedBy   uuid.NullUUID  `json:"authorized_by"`
+	IdempotencyKey sql.NullString `json:"idempotency_key"`
+}
+
+func (q *Queries) GetActorByIdempotencyKey(ctx context.Context, arg GetActorByIdempotencyKeyParams) (Actor, error) {
+	row := q.db.QueryRowContext(ctx, getActorByIdempotencyKey, arg.TenantID, arg.AuthorizedBy, arg.IdempotencyKey)
+	var i Actor
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Type,
+		&i.Name,
+		&i.TeamID,
+		&i.TrustTier,
+		&i.AuthorizedBy,
+		&i.Status,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.RevokedAt,
+		&i.IdempotencyKey,
+	)
+	return i, err
+}
+
+const grantActorEnvironment = `-- name: GrantActorEnvironment :exec
+INSERT INTO actor_environments (actor_id, environment_id) VALUES ($1, $2)
+`
+
+type GrantActorEnvironmentParams struct {
+	ActorID       uuid.UUID `json:"actor_id"`
+	EnvironmentID uuid.UUID `json:"environment_id"`
+}
+
+func (q *Queries) GrantActorEnvironment(ctx context.Context, arg GrantActorEnvironmentParams) error {
+	_, err := q.db.ExecContext(ctx, grantActorEnvironment, arg.ActorID, arg.EnvironmentID)
+	return err
+}
+
+const listActorEnvironments = `-- name: ListActorEnvironments :many
+SELECT environment_id FROM actor_environments WHERE actor_id = $1
+`
+
+func (q *Queries) ListActorEnvironments(ctx context.Context, actorID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.QueryContext(ctx, listActorEnvironments, actorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var environment_id uuid.UUID
+		if err := rows.Scan(&environment_id); err != nil {
+			return nil, err
+		}
+		items = append(items, environment_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

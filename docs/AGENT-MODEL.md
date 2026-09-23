@@ -46,6 +46,8 @@ For programmatic enrolment — provisioning agents as part of a team's own onboa
 
 **An actor may never grant an agent more authority than it holds itself.** A `HumanInTheLoop` human — one whose own actions always need a check — cannot mint an `Autonomous` agent that needs no check at all. Without this rule, enrolment becomes a trivial privilege-escalation path: supervised trust laundered into unsupervised trust.
 
+The same rule applies independently to **environment scope**, not just tier: an actor can only grant an agent access to environments it is itself scoped to. The one exception is the tenant's root actor (created by `POST /v1/setup`, carrying no delegation record) — it is the trust anchor everything else's scope is measured against, so it isn't itself bounded by a prior grant.
+
 **Agents may not enrol agents** by default. Recursive delegation launders authority: if agent A can mint agent B, the delegation chain becomes a place to hide rather than a record. If this is ever needed, it must be an explicit, separately-granted capability with the chain preserved in full.
 
 ## Identity and session are two levels

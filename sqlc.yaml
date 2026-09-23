@@ -66,3 +66,47 @@ sql:
         emit_json_tags: true
         emit_interface: true
         emit_exact_table_names: false
+  - schema: "controlplane/migrations/*.up.sql"
+    queries: "controlplane/internal/credential/queries"
+    engine: "postgresql"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "controlplane/internal/credential/sqlcgen"
+        sql_package: "database/sql"
+        emit_json_tags: true
+        emit_interface: true
+        emit_exact_table_names: false
+  - schema: "controlplane/migrations/*.up.sql"
+    queries: "controlplane/internal/signingkey/queries"
+    engine: "postgresql"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "controlplane/internal/signingkey/sqlcgen"
+        sql_package: "database/sql"
+        emit_json_tags: true
+        emit_interface: true
+        emit_exact_table_names: false
+  - schema: "controlplane/migrations/*.up.sql"
+    queries: "controlplane/internal/workercred/queries"
+    engine: "postgresql"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "controlplane/internal/workercred/sqlcgen"
+        sql_package: "database/sql"
+        emit_json_tags: true
+        emit_interface: true
+        emit_exact_table_names: false
+  - schema: "controlplane/migrations/*.up.sql"
+    queries: "controlplane/internal/verification/queries"
+    engine: "postgresql"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "controlplane/internal/verification/sqlcgen"
+        sql_package: "database/sql"
+        emit_json_tags: true
+        emit_interface: true
+        emit_exact_table_names: false

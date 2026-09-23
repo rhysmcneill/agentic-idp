@@ -13,6 +13,7 @@ import (
 type Querier interface {
 	CreateTeam(ctx context.Context, arg CreateTeamParams) (Team, error)
 	GetTeam(ctx context.Context, id uuid.UUID) (Team, error)
+	GetTeamByName(ctx context.Context, arg GetTeamByNameParams) (Team, error)
 }
 
 var _ Querier = (*Queries)(nil)

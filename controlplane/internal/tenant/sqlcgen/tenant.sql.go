@@ -11,6 +11,17 @@ import (
 	"github.com/google/uuid"
 )
 
+const anyTenantExists = `-- name: AnyTenantExists :one
+SELECT EXISTS (SELECT 1 FROM tenants) AS exists
+`
+
+func (q *Queries) AnyTenantExists(ctx context.Context) (bool, error) {
+	row := q.db.QueryRowContext(ctx, anyTenantExists)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const createTenant = `-- name: CreateTenant :one
 INSERT INTO tenants (name) VALUES ($1) RETURNING id, name, created_at
 `

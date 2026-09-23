@@ -13,17 +13,18 @@ import (
 )
 
 type Actor struct {
-	ID           uuid.UUID     `json:"id"`
-	TenantID     uuid.UUID     `json:"tenant_id"`
-	Type         string        `json:"type"`
-	Name         string        `json:"name"`
-	TeamID       uuid.UUID     `json:"team_id"`
-	TrustTier    int16         `json:"trust_tier"`
-	AuthorizedBy uuid.NullUUID `json:"authorized_by"`
-	Status       string        `json:"status"`
-	ExpiresAt    sql.NullTime  `json:"expires_at"`
-	CreatedAt    time.Time     `json:"created_at"`
-	RevokedAt    sql.NullTime  `json:"revoked_at"`
+	ID             uuid.UUID      `json:"id"`
+	TenantID       uuid.UUID      `json:"tenant_id"`
+	Type           string         `json:"type"`
+	Name           string         `json:"name"`
+	TeamID         uuid.UUID      `json:"team_id"`
+	TrustTier      int16          `json:"trust_tier"`
+	AuthorizedBy   uuid.NullUUID  `json:"authorized_by"`
+	Status         string         `json:"status"`
+	ExpiresAt      sql.NullTime   `json:"expires_at"`
+	CreatedAt      time.Time      `json:"created_at"`
+	RevokedAt      sql.NullTime   `json:"revoked_at"`
+	IdempotencyKey sql.NullString `json:"idempotency_key"`
 }
 
 type ActorEnvironment struct {
@@ -66,11 +67,37 @@ type EnvironmentAwsTierRole struct {
 	RoleArn       string    `json:"role_arn"`
 }
 
+type EnvironmentVerification struct {
+	ID            uuid.UUID       `json:"id"`
+	TenantID      uuid.UUID       `json:"tenant_id"`
+	EnvironmentID uuid.UUID       `json:"environment_id"`
+	Status        string          `json:"status"`
+	RequestedBy   uuid.UUID       `json:"requested_by"`
+	ClaimedBy     uuid.NullUUID   `json:"claimed_by"`
+	TierResults   json.RawMessage `json:"tier_results"`
+	RequestedAt   time.Time       `json:"requested_at"`
+	ClaimedAt     sql.NullTime    `json:"claimed_at"`
+	CompletedAt   sql.NullTime    `json:"completed_at"`
+}
+
+type LocalUser struct {
+	ActorID      uuid.UUID `json:"actor_id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"password_hash"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
 type RevokedSession struct {
 	Jti       uuid.UUID `json:"jti"`
 	ActorID   uuid.UUID `json:"actor_id"`
 	RevokedAt time.Time `json:"revoked_at"`
 	ExpiresAt time.Time `json:"expires_at"`
+}
+
+type SigningKey struct {
+	ID         bool      `json:"id"`
+	PrivateKey []byte    `json:"private_key"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 type Team struct {
@@ -84,4 +111,18 @@ type Tenant struct {
 	ID        uuid.UUID `json:"id"`
 	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type WorkerCredential struct {
+	ID        uuid.UUID    `json:"id"`
+	TenantID  uuid.UUID    `json:"tenant_id"`
+	Name      string       `json:"name"`
+	TokenHash string       `json:"token_hash"`
+	CreatedAt time.Time    `json:"created_at"`
+	RevokedAt sql.NullTime `json:"revoked_at"`
+}
+
+type WorkerCredentialEnvironment struct {
+	WorkerCredentialID uuid.UUID `json:"worker_credential_id"`
+	EnvironmentID      uuid.UUID `json:"environment_id"`
 }
