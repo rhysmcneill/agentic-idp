@@ -92,6 +92,9 @@ The root of every other table. Present from commit one even though v1 ships self
 | `expires_at` | `timestamptz` NULL | required in practice for agents ("indefinite agent credentials are not offered" — [AGENT-MODEL.md](AGENT-MODEL.md)); nullable because a human actor's *account* doesn't expire the same way a registered agent does |
 | `created_at` | `timestamptz` NOT NULL DEFAULT `now()` | |
 | `revoked_at` | `timestamptz` NULL | |
+| `idempotency_key` | `text` NULL | caller-supplied on enrolment; same pattern as `runs.idempotency_key` below |
+
+`UNIQUE (tenant_id, authorized_by, idempotency_key) WHERE idempotency_key IS NOT NULL`. A retried enrolment with the same key returns the actor a prior call already created rather than minting a duplicate — but reissues a fresh token rather than replaying the original byte-for-byte, since agent tokens are never persisted. The reissue re-checks the caller's *current* tier and environment scope before minting, rather than trusting the stored actor row's authority, and is itself an audited `agent.token.reissued` event distinct from the original `agent.enrolled`.
 
 `identity.Claims.Delegation.AuthorizedBy`/`TeamID` are read off the verified token at request time and are **not** re-derived from this table per request (that would reintroduce a request-time trust decision the token is supposed to settle) — but this table is where `Issue` looks up the issuing actor's own tier to enforce [`ErrPrivilegeEscalation`](../pkg/identity/errors.go), and where enrolment and revocation are recorded.
 
@@ -269,7 +272,7 @@ One row per run that reaches `awaiting_approval` (a run that auto-executes at `A
 | `tenant_id` | `uuid` NOT NULL REFERENCES `tenants` | |
 | `occurred_at` | `timestamptz` NOT NULL DEFAULT `now()` | |
 | `actor_id` | `uuid` NOT NULL REFERENCES `actors` | |
-| `action` | `text` NOT NULL | e.g. `run.requested`, `approval.decided`, `credential.mint`, `agent.enrolled`, `agent.revoked`, `session.revoked` |
+| `action` | `text` NOT NULL | e.g. `run.requested`, `approval.decided`, `credential.mint`, `agent.enrolled`, `agent.token.reissued`, `agent.revoked`, `session.revoked`, `worker.enrolled`, `environment.registered`, `environment.verify.requested`, `environment.verify.completed` |
 | `run_id` | `uuid` NULL REFERENCES `runs` | populated when the event relates to a run |
 | `tier` | `smallint` NULL CHECK (1–3) | populated for `credential.mint` — the tier the credential was scoped to |
 | `environment_id` | `uuid` NULL REFERENCES `environments` | populated for `credential.mint` |

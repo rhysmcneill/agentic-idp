@@ -21,6 +21,8 @@ agentic-idp/
       team/                     # owners for catalog entries, routing for approvals
       actor/                    # humans and agents as typed principals
       environment/              # tier role ARNs, external IDs, trust anchor
+      workercred/               # the worker's own hashed bearer credential — not an identity.Actor
+      verification/             # environment_verifications: the connectivity-check job queue
       policy/                   # typed trust tiers (OPA from Phase 2)
       run/                      # state machine, job queue, approvals, run authorisation
       audit/                    # append-only
@@ -36,6 +38,10 @@ agentic-idp/
   worker/                       # customer-deployed; the ONLY component holding cloud credentials
     cmd/worker/
     internal/
+      service/                  # wires config, broker and poller together; cmd/worker/main.go's thin Run
+      poller/                   # the main loop: poll for a job, execute it, report back
+      controlplane/             # the worker's own HTTP client, authenticating with its worker credential
+      config/                   # env-var config, incl. reading the worker token from a file or env var
       broker/
         aws/                    # the only caller of sts:AssumeRole; mints tier-scoped credentials
         # gcp/ azure/ — deferred, see docs/DECISIONS.md 017
