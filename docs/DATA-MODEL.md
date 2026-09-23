@@ -33,6 +33,13 @@ erDiagram
     ENVIRONMENT_AWS_CONFIG ||--o{ ENVIRONMENT_AWS_TIER_ROLES : "has per tier"
     ACTORS ||--o{ ACTORS : "authorised (enrolled) by"
 
+    TENANTS ||--o{ WORKER_CREDENTIALS : has
+    WORKER_CREDENTIALS ||--o{ WORKER_CREDENTIAL_ENVIRONMENTS : "scoped to"
+    ENVIRONMENTS ||--o{ WORKER_CREDENTIAL_ENVIRONMENTS : scopes
+    ENVIRONMENTS ||--o{ ENVIRONMENT_VERIFICATIONS : "checked by"
+    ACTORS ||--o{ ENVIRONMENT_VERIFICATIONS : requests
+    WORKER_CREDENTIALS ||--o{ ENVIRONMENT_VERIFICATIONS : claims
+
     CATALOG_ENTITIES ||--o{ BINDINGS : "bound via"
     ENVIRONMENTS ||--o{ BINDINGS : "bound via"
     PIPELINES ||--o{ BINDINGS : "bound via"
@@ -80,7 +87,7 @@ The root of every other table. Present from commit one even though v1 ships self
 | `name` | `text` NOT NULL | display name (`claude-code-rhys`) |
 | `team_id` | `uuid` NOT NULL REFERENCES `teams` | |
 | `trust_tier` | `smallint` NOT NULL CHECK (1–3) | mirrors `identity.Tier` |
-| `authorized_by` | `uuid` NULL REFERENCES `actors` | self-referential; who enrolled this actor — see [Decision 005](DECISIONS.md) and [AGENT-MODEL.md](AGENT-MODEL.md). `NULL` only for the actor bootstrapped by the static admin token |
+| `authorized_by` | `uuid` NULL REFERENCES `actors` | self-referential; who enrolled this actor — see [Decision 005](DECISIONS.md) and [AGENT-MODEL.md](AGENT-MODEL.md). `NULL` only for the actor created by `POST /v1/setup` — see [Decision 018](DECISIONS.md) |
 | `status` | `text` NOT NULL DEFAULT `active` CHECK IN (`active`, `revoked`) | whole-identity revocation — see Session and revocation below |
 | `expires_at` | `timestamptz` NULL | required in practice for agents ("indefinite agent credentials are not offered" — [AGENT-MODEL.md](AGENT-MODEL.md)); nullable because a human actor's *account* doesn't expire the same way a registered agent does |
 | `created_at` | `timestamptz` NOT NULL DEFAULT `now()` | |
@@ -143,6 +150,23 @@ When those providers ship, each adds its own pair, following the same split — 
 
 - `environment_gcp_config` (`project_id`, `workload_identity_pool`, `workload_identity_provider`, `service_account_email`) + `environment_gcp_tier_bindings` (`environment_id`, `tier`, `service_account_email`) — GCP's account-level identity is a Workload Identity Federation pool binding, not an assumable role.
 - `environment_azure_config` (`tenant_id`, `client_id`) + `environment_azure_tier_bindings` (`environment_id`, `tier`, `federated_credential_subject`) — Azure's is a federated credential tied to an app registration and subject claim.
+
+### `environment_verifications`
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` PK | |
+| `tenant_id` | `uuid` NOT NULL REFERENCES `tenants` | |
+| `environment_id` | `uuid` NOT NULL REFERENCES `environments` | |
+| `status` | `text` NOT NULL DEFAULT `'pending'` CHECK IN (`pending`, `succeeded`, `failed`) | |
+| `requested_by` | `uuid` NOT NULL REFERENCES `actors` | the human/agent actor that called `POST /v1/environments/{name}/verify` |
+| `claimed_by` | `uuid` NULL REFERENCES `worker_credentials` | which worker claimed the job — **not** `actors`; a worker is not an actor, see [Decision 019](DECISIONS.md) |
+| `tier_results` | `jsonb` NOT NULL DEFAULT `'{}'` | per-tier `{ok, error}` once completed, e.g. `{"read_only": {"ok": true}, "autonomous": {"ok": false, "error": "AccessDenied"}}` |
+| `requested_at` | `timestamptz` NOT NULL DEFAULT `now()` | |
+| `claimed_at` | `timestamptz` NULL | |
+| `completed_at` | `timestamptz` NULL | |
+
+This is deliberately **not** the Phase 1 run state machine ([ARCHITECTURE.md](ARCHITECTURE.md)'s "Run model") — that, and its Postgres-backed job queue, don't exist until Phase 1. This is a small, single-purpose queue-of-one-job-type for the Phase 0 connectivity-check milestone: `POST /v1/environments/{name}/verify` inserts a `pending` row, the worker claims the oldest pending row scoped to its own granted environments (`FOR UPDATE SKIP LOCKED`, so concurrent workers or poll ticks never double-claim), calls `sts:AssumeRole` per tier via `broker/aws`, and reports back — see [ARCHITECTURE.md](ARCHITECTURE.md)'s "Connectivity check" for the full sequence.
 
 ### `catalog_entities` *(Phase 2)*
 
@@ -291,6 +315,45 @@ Per-run cost capture, rolling up per actor in the Phase 3b cost views — the ro
 
 This means `Verify`'s signature changes from pure-function signature verification to something that takes a revocation check and a context — a real code change to `pkg/identity`, not just a migration, and should land as part of the same Phase 0 work that adds enrolment/revocation.
 
+## Local admin login
+
+### `local_users`
+
+| Column | Type | Notes |
+|---|---|---|
+| `actor_id` | `uuid` PK, REFERENCES `actors` ON DELETE CASCADE | 1:1 |
+| `username` | `text` NOT NULL UNIQUE | |
+| `password_hash` | `text` NOT NULL | bcrypt |
+| `created_at` | `timestamptz` NOT NULL DEFAULT `now()` | |
+
+Kept separate from `actors` rather than columns there, because almost no actor ever has one: agents never authenticate this way, and no more than one human needs to until OIDC exists as an alternative — see [Decision 018](DECISIONS.md). `POST /v1/setup` is the only thing that ever inserts a row here today.
+
+## Worker authentication
+
+The worker is not an `actors` row at all — see [Decision 019](DECISIONS.md): it never decides or takes a governed action, only polls for jobs another actor already had authorised and reports facts back, so it doesn't need `Tier`, `Team` or `Delegation`. Its own two tables answer only "is this the registered worker for one of these environments?"
+
+### `worker_credentials`
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` PK | |
+| `tenant_id` | `uuid` NOT NULL REFERENCES `tenants` | |
+| `name` | `text` NOT NULL | operator-chosen label, e.g. `worker-staging` |
+| `token_hash` | `text` NOT NULL | SHA-256 of the token, not bcrypt: a bearer token carries no separate identifier to look up a row by first (unlike `local_users`, where the *username* finds the row and bcrypt only then compares the password) — bcrypt's per-row salt makes a token-only lookup impossible without scanning every row. The token's own high entropy, not a salt, is what makes an unsalted deterministic hash safe here — the same approach GitHub PATs and Kubernetes bootstrap tokens use. Checked by its own `requireWorkerAuth` middleware, never `identity.Verifier` |
+| `created_at` | `timestamptz` NOT NULL DEFAULT `now()` | |
+| `revoked_at` | `timestamptz` NULL | whole-credential revocation; no per-session `jti` concept — a worker isn't minting individually-revocable sessions the way an actor's token is |
+
+`UNIQUE (tenant_id, name)`. `idpctl worker enrol` is the only thing that ever inserts a row here; the plaintext token is shown once and never stored.
+
+### `worker_credential_environments`
+
+| Column | Type | Notes |
+|---|---|---|
+| `worker_credential_id` | `uuid` NOT NULL REFERENCES `worker_credentials` ON DELETE CASCADE | |
+| `environment_id` | `uuid` NOT NULL REFERENCES `environments` ON DELETE RESTRICT | |
+
+`PRIMARY KEY (worker_credential_id, environment_id)`. Mirrors `actor_environments`' shape exactly, without inheriting actor semantics — the environment scope a worker was granted at enrolment, which bounds which `environment_verifications` rows it may claim or report on.
+
 ## Mapping to existing Go types
 
 | Table | Go type | Where |
@@ -300,6 +363,8 @@ This means `Verify`'s signature changes from pure-function signature verificatio
 | `pipelines` | `ci.Config`, `ci.Provider` | `pkg/ci/types.go` |
 | `runs` (CI-facing columns) | `ci.Handle`, `ci.RunStatus`, `ci.Status` | `pkg/ci/types.go` |
 | `environments` / `environment_aws_config` / `environment_aws_tier_roles` | `cloud.EnvironmentConfig` (per [ARCHITECTURE.md](ARCHITECTURE.md)'s `pkg/cloud.Broker`) | `worker/internal/broker/aws` (Phase 0) |
+| `worker_credentials` / `worker_credential_environments` | new `workercred.Credential` type — no `identity` type, per [Decision 019](DECISIONS.md) | `controlplane/internal/workercred` (Phase 0) |
+| `environment_verifications` | new `verification.Verification` type | `controlplane/internal/verification` (Phase 0) |
 
 ## Open questions / gaps this doc surfaces
 

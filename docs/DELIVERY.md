@@ -94,6 +94,8 @@ The cost is real and accepted: a docs-only change to the frontend bumps the same
 - Non-root user in every runtime image.
 - No secrets baked into any image layer, ever — this is the same invariant as the control plane never holding credentials, applied to the image build itself rather than the running process.
 
-## Open question
+## Open questions
 
 **Where does `idpctl` (the CLI) get distributed?** Not a container concern — it needs its own path (GitHub Releases with prebuilt binaries, a Homebrew tap, or both). Not yet placed in a phase; revisit once Phase 1 nears completion, since design partners running the onboarding sequence in [ONBOARDING.md](ONBOARDING.md) will need it.
+
+**How does the API get an OpenAPI spec, given `CLAUDE.md`'s "REST, OpenAPI-documented" rule?** Deliberately deferred rather than picked under time pressure with three handlers to look at. `swaggo/swag` was tried and reverted — it only generates Swagger 2.0 (its own maintainers have said OpenAPI 3 won't be supported), and its comment annotations are unenforced free text with the same drift risk as a hand-written spec. `oapi-codegen` (spec-first, generates a `ServerInterface` the compiler enforces) and `huma` (code-first, wraps stdlib `net/http`, spec derives automatically from struct tags — no annotations or hand-written YAML at all) are the two credible options; `huma` fits this project's "no manual spec authoring, ever" requirement best but means moving handlers into its input/output-struct calling convention, a real restructure. Revisit once the API surface is bigger than three endpoints and the actual pain of not having one is felt, rather than speculating now.

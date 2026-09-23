@@ -14,7 +14,7 @@ Deliberately tiny. No OIDC, no catalog, no frontend.
 
 - `Tenant`, `Team`, `Actor` models; **token-bound delegation claims**
 - Agent enrolment via CLI and API (UI comes in Phase 3) — see [AGENT-MODEL.md](AGENT-MODEL.md)
-- Static admin bootstrap token
+- Operator-driven admin bootstrap (`idpctl setup`, a one-time API endpoint) — no generated or static token; see [Decision 018](DECISIONS.md)
 - `Environment` registration: tier role ARNs, external ID, trust anchor
 - **`pkg/cloud.Broker`**: provider-agnostic credential-broker interface, with `worker/internal/broker/aws` as the only implementation — see decision 017. GCP/Azure stay deferred; only the interface is generalised now
 - `sts:AssumeRole` connectivity check, via the AWS broker
@@ -27,6 +27,7 @@ Deliberately tiny. No OIDC, no catalog, no frontend.
 - Codecov wired in alongside CI, establishing the coverage baseline before code accumulates that lowers it
 - Conventional commits adopted now, even though nothing consumes them yet — this is what makes semantic-release a drop-in later rather than a retrofit
 - **Dockerfiles for `controlplane` and `worker`**, plus `docker-compose.yml` for local dev — not deferred to Phase 3, because the Phase 0 milestone below is not real unless a customer can actually run these as containers
+- Add testing framework with ministack for aws emulation for E2E testing
 
 **Milestone** — a mock agent carrying a bound delegation claim triggers a no-op job that a customer-run **containerised** worker executes by assuming a real tier role.
 
@@ -155,6 +156,8 @@ A **monospace family is first-class, not an afterthought.** Role ARNs, run IDs, 
 #### Why `onboard` matters more than usual
 
 Day one, a freshly installed instance has an empty catalog, no runs, no agents and no environments. **The empty state is the first-run experience**, not an edge case — and for a self-hosted product with no onboarding call, it is the entire activation path. It should teach the [onboarding sequence](ONBOARDING.md) rather than render a blank table.
+
+Before any of that: a not-yet-configured instance has no tenant at all, and must not render a dashboard, empty or otherwise. Visiting it shows a setup form (tenant name, admin username, password) instead of a login screen, calling the same one-time `POST /v1/setup` `idpctl setup` already uses — see [Decision 018](DECISIONS.md). This routing is state-driven (checked once per app load, not per navigation) and disappears permanently once setup has run.
 
 #### Why `audit` is commercially load-bearing
 

@@ -136,3 +136,26 @@ func (q *Queries) GetEnvironmentAWSTierRole(ctx context.Context, arg GetEnvironm
 	err := row.Scan(&i.EnvironmentID, &i.Tier, &i.RoleArn)
 	return i, err
 }
+
+const getEnvironmentByName = `-- name: GetEnvironmentByName :one
+SELECT id, tenant_id, name, provider, region, created_at FROM environments WHERE tenant_id = $1 AND name = $2
+`
+
+type GetEnvironmentByNameParams struct {
+	TenantID uuid.UUID `json:"tenant_id"`
+	Name     string    `json:"name"`
+}
+
+func (q *Queries) GetEnvironmentByName(ctx context.Context, arg GetEnvironmentByNameParams) (Environment, error) {
+	row := q.db.QueryRowContext(ctx, getEnvironmentByName, arg.TenantID, arg.Name)
+	var i Environment
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Name,
+		&i.Provider,
+		&i.Region,
+		&i.CreatedAt,
+	)
+	return i, err
+}

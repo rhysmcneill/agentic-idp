@@ -25,7 +25,7 @@ Steps 1–5 are platform setup and happen once. Steps 6–8 repeat per team and 
 
 Helm into an existing cluster, or Docker Compose for evaluation. Requires PostgreSQL.
 
-Bootstrap produces a single static admin token. OIDC is configured later (Phase 2); the admin token is the only credential at this point and should be treated accordingly.
+A fresh instance has no admin credential at all. Run `idpctl setup` once — it prompts for a tenant name, admin username and password, creates them directly, and logs you in. From Phase 3, the UI does the same thing automatically: visiting a not-yet-configured instance shows this setup form instead of a login screen, calling the identical API underneath — CLI and UI are two clients of the same one-time `POST /v1/setup`, not two different mechanisms. That endpoint refuses permanently once it's been run — see [Decision 018](DECISIONS.md). OIDC is configured later (Phase 2); this local admin account is the only credential at this point and should be treated accordingly.
 
 ## 2. Create tier IAM roles
 
@@ -58,7 +58,8 @@ idpctl environment create \
   --role-arn-tier1 arn:aws:iam::...:role/agentic-idp-staging-tier1 \
   --role-arn-tier2 arn:aws:iam::...:role/agentic-idp-staging-tier2 \
   --role-arn-tier3 arn:aws:iam::...:role/agentic-idp-staging-tier3 \
-  --external-id <id>
+  --external-id <id> \
+  --trust-anchor arn:aws:iam::<their-account>:role/<worker-role>
 ```
 
 The control plane stores role ARNs, the external ID and the trust anchor. **It stores nothing assumable on its own.**

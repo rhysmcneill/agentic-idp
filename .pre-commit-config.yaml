@@ -53,7 +53,13 @@ repos:
         name: gosec
         language: system
         entry: gosec
-        args: [./...]
+        # -exclude-generated matches golangci-lint's own gosec integration,
+        # which skips generated files by default — sqlc output isn't
+        # hand-written, so a G101 hit on a generated query constant named
+        # e.g. createWorkerCredential (matching gosec's name-based
+        # hardcoded-credential heuristic against a SQL string literal, not
+        # an actual secret) isn't actionable by editing source.
+        args: [-exclude-generated, ./...]
         types: [go]
         pass_filenames: false
       # Catches a queries/*.sql edit committed without `make generate` — sqlc

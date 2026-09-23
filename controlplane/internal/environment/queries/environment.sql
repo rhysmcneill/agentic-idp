@@ -4,6 +4,9 @@ INSERT INTO environments (tenant_id, name, provider, region) VALUES ($1, $2, $3,
 -- name: GetEnvironment :one
 SELECT * FROM environments WHERE id = $1;
 
+-- name: GetEnvironmentByName :one
+SELECT * FROM environments WHERE tenant_id = $1 AND name = $2;
+
 -- name: CreateEnvironmentAWSConfig :one
 INSERT INTO environment_aws_config (environment_id, account_ref, external_id, trust_anchor)
 VALUES ($1, $2, $3, $4) RETURNING *;

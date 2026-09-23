@@ -11,6 +11,7 @@ import (
 )
 
 type Querier interface {
+	AnyTenantExists(ctx context.Context) (bool, error)
 	CreateTenant(ctx context.Context, name string) (Tenant, error)
 	GetTenant(ctx context.Context, id uuid.UUID) (Tenant, error)
 }

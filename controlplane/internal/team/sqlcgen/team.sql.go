@@ -47,3 +47,24 @@ func (q *Queries) GetTeam(ctx context.Context, id uuid.UUID) (Team, error) {
 	)
 	return i, err
 }
+
+const getTeamByName = `-- name: GetTeamByName :one
+SELECT id, tenant_id, name, created_at FROM teams WHERE tenant_id = $1 AND name = $2
+`
+
+type GetTeamByNameParams struct {
+	TenantID uuid.UUID `json:"tenant_id"`
+	Name     string    `json:"name"`
+}
+
+func (q *Queries) GetTeamByName(ctx context.Context, arg GetTeamByNameParams) (Team, error) {
+	row := q.db.QueryRowContext(ctx, getTeamByName, arg.TenantID, arg.Name)
+	var i Team
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Name,
+		&i.CreatedAt,
+	)
+	return i, err
+}
