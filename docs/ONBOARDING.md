@@ -71,6 +71,18 @@ A single binary, in the account and network where their CI and cloud live. It ne
 - Outbound reachability to the control plane (no inbound holes)
 - An identity matching the `trust_anchor` from step 2
 - Credentials for their CI system
+- Its own credential to authenticate to the control plane — not an actor token, since the worker never decides or takes a governed action itself:
+
+```bash
+idpctl worker enrol --name worker-staging --environments staging
+```
+
+The output token is shown once and is the operator's own responsibility to get onto the worker, via whichever mechanism the customer's deployment already uses for secrets. The worker itself reads it from one of:
+
+- `IDP_WORKER_TOKEN` — the token value directly (a plain env var, or one a Kubernetes Secret injects)
+- `IDP_WORKER_TOKEN_FILE` — a path to read it from instead (a Docker secret, or a Kubernetes Secret mounted as a file)
+
+Exactly one of the two must be set. The worker also needs `IDP_CONTROL_PLANE_URL` (required) and takes an optional `IDP_POLL_INTERVAL` (default `5s`).
 
 ## 5. Verify connectivity
 
