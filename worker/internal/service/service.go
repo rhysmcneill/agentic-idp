@@ -35,7 +35,16 @@ func Run(parent context.Context, getenv func(string) string) error {
 		return fmt.Errorf("constructing AWS broker: %w", err)
 	}
 
-	cp := controlplane.New(cfg.ControlPlaneURL, cfg.Token)
+	token := cfg.Token
+	if cfg.Bootstrap() {
+		var credentialID string
+		credentialID, token, err = controlplane.Bootstrap(ctx, cfg.ControlPlaneURL, cfg.BootstrapToken, cfg.WorkerName)
+		if err != nil {
+			return fmt.Errorf("bootstrapping worker credential: %w", err)
+		}
+		slog.Info("worker bootstrapped", "worker_credential_id", credentialID)
+	}
+	cp := controlplane.New(cfg.ControlPlaneURL, token)
 
 	slog.Info("worker starting", "control_plane", cfg.ControlPlaneURL, "poll_interval", cfg.PollInterval)
 	poller.Run(ctx, cp, broker, cfg.PollInterval)

@@ -46,7 +46,15 @@ It is a thin, unprivileged translator. It **forwards the agent's token** rather 
 
 **Worker** (`worker/`) — customer-deployed single binary, and the only component that holds cloud credentials. Polls the control plane outbound for approved jobs. Assumes the tier-appropriate IAM role via `internal/broker`, holds temporary credentials in memory only, triggers and tracks CI runs, reports back.
 
-It also **receives OIDC callbacks from the customer's pipelines** (`internal/ciauth`), since brokering credentials requires calling STS and only the worker may do that. The worker sits in the customer's account alongside their CI, so this is an internal boundary; the link that crosses a trust boundary — worker to control plane — remains outbound-only.
+It also **receives OIDC callbacks from the customer's pipelines** (`internal/ciauth`), since brokering credentials requires calling STS and only the worker may do that. The link that crosses a trust boundary — worker to control plane — remains outbound-only regardless of the two cases below.
+
+**One worker identity, many AWS accounts.** The diagram above shows one "Customer AWS account" box for simplicity, but nothing ties a worker process to a single account — see [Decision 020](DECISIONS.md). One worker, running under one stable identity (IRSA role, instance profile, ECS task role), assumes IAM roles across as many accounts as it has been granted `Environment`s for, via ordinary cross-account `sts:AssumeRole` + per-environment external ID. Deploying a second worker is an operational choice (throughput, HA, or CI reachability, next), never a function of account count. See [WORKER-AWS-AUTH.md](WORKER-AWS-AUTH.md) for the IAM mechanics.
+
+**Two CI placements, both first-class** ([Decision 021](DECISIONS.md)):
+- **Self-hosted CI** (the diagram's case): the customer's own runner fleet shares a private network with the worker, so the OIDC callback stays internal — this is the "internal boundary" the diagram depicts.
+- **SaaS/cloud-hosted CI** (GitHub-hosted runners, Bitbucket Cloud Pipelines): the CI job runs on the provider's own infrastructure, not the customer's network. There is no private network for the worker to sit inside of, so its callback endpoint is instead externally reachable — a public-facing boundary, terminated over TLS, with the same trust assumption as any other public webhook receiver (Codecov, Snyk), not a weaker one.
+
+A customer may run both placements at once against the same control plane. Neither is a variant of the other; `internal/ciauth` (Phase 1, currently unbuilt) must be designed for both from the start.
 
 **CLI** (`cli/`) — `idpctl`. Used by humans and scriptable by agents that do not speak MCP.
 

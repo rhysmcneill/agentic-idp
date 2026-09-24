@@ -175,6 +175,37 @@ func (c *Client) CreateWorker(ctx context.Context, token string, req CreateWorke
 	return resp, nil
 }
 
+// WorkerCredential is one entry in GET /v1/workers' response body.
+type WorkerCredential struct {
+	WorkerCredentialID string   `json:"worker_credential_id"`
+	Name               string   `json:"name"`
+	Environments       []string `json:"environments"`
+	RevokedAt          *string  `json:"revoked_at,omitempty"`
+}
+
+// ListWorkers returns every worker credential in the caller's tenant — how
+// an operator finds a credential's ID by the name they gave it.
+func (c *Client) ListWorkers(ctx context.Context, token string) ([]WorkerCredential, error) {
+	var resp []WorkerCredential
+	if err := c.do(ctx, http.MethodGet, "/v1/workers", token, nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// GrantWorkerEnvironmentsRequest is POST /v1/workers/{id}/environments'
+// request body.
+type GrantWorkerEnvironmentsRequest struct {
+	Environments []string `json:"environments"`
+}
+
+// GrantWorkerEnvironments adds environments to an already-enrolled worker
+// credential — see Decision 020, the way a running worker gains access to a
+// newly onboarded AWS account without being re-enrolled or redeployed.
+func (c *Client) GrantWorkerEnvironments(ctx context.Context, token, workerCredentialID string, req GrantWorkerEnvironmentsRequest) error {
+	return c.do(ctx, http.MethodPost, "/v1/workers/"+workerCredentialID+"/environments", token, req, nil)
+}
+
 // TriggerVerificationResponse is POST /v1/environments/{name}/verify's
 // response body.
 type TriggerVerificationResponse struct {

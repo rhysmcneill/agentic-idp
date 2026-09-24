@@ -102,6 +102,51 @@ func TestClient_ReportResult_SendsRequest(t *testing.T) {
 	}
 }
 
+func TestBootstrap_ReturnsToken(t *testing.T) {
+	ts := fakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/workers/bootstrap" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer a-bootstrap-secret" {
+			t.Errorf("Authorization = %q, want %q", got, "Bearer a-bootstrap-secret")
+		}
+		var body struct {
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decoding request body: %v", err)
+		}
+		if body.Name != "worker-staging" {
+			t.Errorf("Name = %q, want %q", body.Name, "worker-staging")
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"worker_credential_id": "cred-1",
+			"token":                "a-minted-token",
+		})
+	})
+
+	credentialID, token, err := controlplane.Bootstrap(t.Context(), ts.URL, "a-bootstrap-secret", "worker-staging")
+	if err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	if credentialID != "cred-1" {
+		t.Errorf("credentialID = %q, want %q", credentialID, "cred-1")
+	}
+	if token != "a-minted-token" {
+		t.Errorf("token = %q, want %q", token, "a-minted-token")
+	}
+}
+
+func TestBootstrap_UnexpectedStatus(t *testing.T) {
+	ts := fakeServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	})
+
+	if _, _, err := controlplane.Bootstrap(t.Context(), ts.URL, "wrong-secret", "worker-staging"); err == nil {
+		t.Fatal("Bootstrap succeeded despite a 401 response")
+	}
+}
+
 func TestClient_ReportResult_UnexpectedStatus(t *testing.T) {
 	ts := fakeServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

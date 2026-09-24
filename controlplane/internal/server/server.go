@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -31,8 +32,9 @@ import (
 const sessionPruneInterval = 1 * time.Hour
 
 type config struct {
-	databaseURL string
-	listenAddr  string
+	databaseURL          string
+	listenAddr           string
+	workerBootstrapToken string
 }
 
 // loadConfig takes getenv explicitly (rather than calling os.Getenv itself)
@@ -46,12 +48,41 @@ func loadConfig(getenv func(string) string) (config, error) {
 		return config{}, errors.New("DATABASE_URL is required")
 	}
 
-	cfg.listenAddr = getenv("LISTEN_ADDR")
-	if cfg.listenAddr == "" {
-		cfg.listenAddr = ":8080"
+	port := getenv("LISTEN_PORT")
+	if port == "" {
+		port = "8080"
 	}
+	cfg.listenAddr = ":" + port
+
+	token, err := loadWorkerBootstrapToken(getenv)
+	if err != nil {
+		return config{}, err
+	}
+	cfg.workerBootstrapToken = token
 
 	return cfg, nil
+}
+
+// loadWorkerBootstrapToken reads WORKER_BOOTSTRAP_TOKEN/_FILE. Optional —
+// an empty result disables worker self-registration entirely.
+func loadWorkerBootstrapToken(getenv func(string) string) (string, error) {
+	fromEnv := getenv("WORKER_BOOTSTRAP_TOKEN")
+	fromFile := getenv("WORKER_BOOTSTRAP_TOKEN_FILE")
+
+	switch {
+	case fromEnv != "" && fromFile != "":
+		return "", errors.New("set only one of WORKER_BOOTSTRAP_TOKEN or WORKER_BOOTSTRAP_TOKEN_FILE, not both")
+	case fromEnv != "":
+		return fromEnv, nil
+	case fromFile != "":
+		b, err := os.ReadFile(fromFile) // #nosec G304 -- operator-controlled path from its own deployment config
+		if err != nil {
+			return "", fmt.Errorf("reading WORKER_BOOTSTRAP_TOKEN_FILE: %w", err)
+		}
+		return strings.TrimSpace(string(b)), nil
+	default:
+		return "", nil
+	}
 }
 
 // Run loads config, connects to Postgres, applies migrations, and serves the
@@ -87,6 +118,9 @@ func Run(parent context.Context, getenv func(string) string) error {
 	verifier := identity.NewVerifier(priv.Public().(ed25519.PublicKey))
 
 	srv := api.NewServer(conn, issuer, verifier)
+	if cfg.workerBootstrapToken != "" {
+		srv.EnableWorkerBootstrap(cfg.workerBootstrapToken)
+	}
 
 	go pruneExpiredSessions(ctx, conn)
 
