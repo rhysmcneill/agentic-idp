@@ -44,6 +44,46 @@ func New(baseURL, token string) *Client {
 	return &Client{baseURL: baseURL, token: token, http: &http.Client{}}
 }
 
+// Bootstrap self-registers name against baseURL using the control plane's
+// shared bootstrap secret (Decision 022) and returns the worker credential's
+// ID (safe to log — an operator needs it to grant environments later) and
+// token to use for the ongoing poll loop. Get-or-rotate, so it's safe to
+// call on every startup instead of caching a token across restarts.
+func Bootstrap(ctx context.Context, baseURL, bootstrapToken, name string) (credentialID, token string, err error) {
+	body, err := json.Marshal(struct {
+		Name string `json:"name"`
+	}{Name: name})
+	if err != nil {
+		return "", "", fmt.Errorf("controlplane: marshalling bootstrap request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/workers/bootstrap", bytes.NewReader(body))
+	if err != nil {
+		return "", "", fmt.Errorf("controlplane: building bootstrap request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+bootstrapToken)
+
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("controlplane: bootstrapping: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("controlplane: bootstrapping: unexpected status %d", resp.StatusCode)
+	}
+
+	var wire struct {
+		WorkerCredentialID string `json:"worker_credential_id"`
+		Token              string `json:"token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&wire); err != nil {
+		return "", "", fmt.Errorf("controlplane: decoding bootstrap response: %w", err)
+	}
+	return wire.WorkerCredentialID, wire.Token, nil
+}
+
 // NextJob claims the oldest pending verification scoped to this worker
 // credential's granted environments, or returns a nil Job if nothing is
 // pending.

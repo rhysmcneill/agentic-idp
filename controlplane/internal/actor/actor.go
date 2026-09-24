@@ -135,6 +135,19 @@ func (s *Store) GetByIdempotencyKey(ctx context.Context, tenantID, authorizedBy 
 	return fromRow(row), nil
 }
 
+// GetRoot returns tenantID's root actor — the one created by POST /v1/setup
+// with a nil AuthorizedBy — for attributing system-driven audit events.
+func (s *Store) GetRoot(ctx context.Context, tenantID uuid.UUID) (Actor, error) {
+	row, err := s.q.GetRootActor(ctx, tenantID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Actor{}, ErrNotFound
+	}
+	if err != nil {
+		return Actor{}, fmt.Errorf("actor: get root: %w", err)
+	}
+	return fromRow(row), nil
+}
+
 // GrantEnvironment scopes actorID to environmentID — the actor_environments
 // row Claims.Environments must be a subset of at token-issue time.
 func (s *Store) GrantEnvironment(ctx context.Context, actorID, environmentID uuid.UUID) error {

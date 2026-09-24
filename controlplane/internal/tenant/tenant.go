@@ -70,6 +70,19 @@ func (s *Store) AnyExists(ctx context.Context) (bool, error) {
 	return exists, nil
 }
 
+// GetSole returns the instance's one tenant, or ErrNotFound before setup has
+// run — see Decision 018: POST /v1/setup creates exactly one tenant, ever.
+func (s *Store) GetSole(ctx context.Context) (Tenant, error) {
+	row, err := s.q.GetSoleTenant(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Tenant{}, ErrNotFound
+	}
+	if err != nil {
+		return Tenant{}, fmt.Errorf("tenant: get sole: %w", err)
+	}
+	return fromRow(row), nil
+}
+
 func fromRow(row sqlcgen.Tenant) Tenant {
 	return Tenant{ID: row.ID, Name: row.Name, CreatedAt: row.CreatedAt}
 }

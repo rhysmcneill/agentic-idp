@@ -20,6 +20,7 @@ Deliberately tiny. No OIDC, no catalog, no frontend.
 - `sts:AssumeRole` connectivity check, via the AWS broker
 - Append-only audit log
 - Worker skeleton: polls control plane, assumes role, reports back
+- Worker self-registration via a shared bootstrap secret (`POST /v1/workers/bootstrap`), and `POST /v1/workers/{id}/environments` to grant an already-enrolled worker credential access to a newly onboarded AWS account without re-enrolling or redeploying it — see [Decision 022](DECISIONS.md) and [Decision 020](DECISIONS.md). `GET /v1/workers`/`idpctl worker list` is the durable way to find a credential's ID by name for the grant call, rather than relying on the worker's own startup log
 
 **Delivery, alongside the above** (see [DELIVERY.md](DELIVERY.md)):
 - CI on every PR: build, `go vet`, `gofmt -l`, `go test ./...`, `golangci-lint`
@@ -46,12 +47,13 @@ The differentiator. This is the phase to validate with design partners.
 - Run state machine and Postgres-backed job queue
 - Approval workflow (CLI + Slack webhook)
 - **GitHub Actions adapter only**, behind the generic `pkg/ci` interface
-- CI OIDC callback: verify token, match correlation, broker tier-scoped credentials
+- CI OIDC callback (`internal/ciauth`): verify token, match correlation, broker tier-scoped credentials — built for both self-hosted and SaaS/cloud-hosted CI from the start (an internal callback for the former, a public TLS-terminated one for the latter), per [Decision 021](DECISIONS.md), not the self-hosted case alone with SaaS retrofitted later
 - Per-run cost capture
 - Opt-in telemetry
 
 **Delivery, alongside the above:**
 - **Image publishing**: tagged builds of `controlplane` and `worker` pushed to a registry (GHCR) on merge to `main` and on release — a design partner cannot pull and run something that only exists as source
+- Repo protections set up e.g. no push to main directly, no overwriting tags, tags must follow vX.Y.Z
 - **`semantic-release` goes live**, driven by the conventional commits already in place since Phase 0. One version for the whole monorepo, applied to every image tag — see [DELIVERY.md](DELIVERY.md) for why per-service versioning is rejected
 - Helm chart added alongside the images, since this is also the first phase a design partner might actually deploy the platform
 
@@ -71,10 +73,15 @@ The differentiator. This is the phase to validate with design partners.
 ## Phase 2 — Agent-native surface and catalog
 
 - MCP server with async request/poll semantics
+    - Dockerfile created for local dev
+    - docker-compose.yml updated to include mcp
+    - Helm chart updated to include mcp
 - Service catalog and ingestion mechanism
 - `entity ↔ environment ↔ pipeline` binding
 - Scaffold-new-service action
 - OIDC for human authentication
+    - Allow humans to login to be "users" of the product
+    - Give human users permissions to use the app when they login - we should decide how initial users permissions are structured and also how they can get elevated permissions.
 - OPA as the custom-policy escape hatch
 - Extract the Apache 2.0 identity/audit library
 

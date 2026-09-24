@@ -6,6 +6,9 @@ RETURNING *;
 -- name: GetActor :one
 SELECT * FROM actors WHERE id = $1;
 
+-- name: GetRootActor :one
+SELECT * FROM actors WHERE tenant_id = $1 AND authorized_by IS NULL;
+
 -- name: GetActorByIdempotencyKey :one
 SELECT * FROM actors WHERE tenant_id = $1 AND authorized_by = $2 AND idempotency_key = $3;
 

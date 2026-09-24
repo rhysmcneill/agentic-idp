@@ -81,6 +81,64 @@ func TestLoad_BothTokenSourcesSet(t *testing.T) {
 	}
 }
 
+func TestLoad_BootstrapFromEnv(t *testing.T) {
+	cfg, err := config.Load(fakeEnv(map[string]string{
+		"IDP_CONTROL_PLANE_URL":      "http://localhost:8080",
+		"IDP_WORKER_BOOTSTRAP_TOKEN": "a-shared-secret",
+		"IDP_WORKER_NAME":            "worker-staging",
+	}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Bootstrap() {
+		t.Error("Bootstrap() = false, want true")
+	}
+	if cfg.BootstrapToken != "a-shared-secret" {
+		t.Errorf("BootstrapToken = %q, want %q", cfg.BootstrapToken, "a-shared-secret")
+	}
+	if cfg.WorkerName != "worker-staging" {
+		t.Errorf("WorkerName = %q, want %q", cfg.WorkerName, "worker-staging")
+	}
+	if cfg.Token != "" {
+		t.Errorf("Token = %q, want empty in bootstrap mode", cfg.Token)
+	}
+}
+
+func TestLoad_BootstrapRequiresWorkerName(t *testing.T) {
+	_, err := config.Load(fakeEnv(map[string]string{
+		"IDP_CONTROL_PLANE_URL":      "http://localhost:8080",
+		"IDP_WORKER_BOOTSTRAP_TOKEN": "a-shared-secret",
+	}))
+	if err == nil {
+		t.Fatal("Load succeeded with a bootstrap token but no IDP_WORKER_NAME")
+	}
+}
+
+func TestLoad_TokenModeHasBootstrapFalse(t *testing.T) {
+	cfg, err := config.Load(fakeEnv(map[string]string{
+		"IDP_CONTROL_PLANE_URL": "http://localhost:8080",
+		"IDP_WORKER_TOKEN":      "a-worker-token",
+	}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Bootstrap() {
+		t.Error("Bootstrap() = true, want false when a static token is configured")
+	}
+}
+
+func TestLoad_CannotSetBothTokenAndBootstrapToken(t *testing.T) {
+	_, err := config.Load(fakeEnv(map[string]string{
+		"IDP_CONTROL_PLANE_URL":      "http://localhost:8080",
+		"IDP_WORKER_TOKEN":           "a-worker-token",
+		"IDP_WORKER_BOOTSTRAP_TOKEN": "a-shared-secret",
+		"IDP_WORKER_NAME":            "worker-staging",
+	}))
+	if err == nil {
+		t.Fatal("Load succeeded with both a token and a bootstrap token set")
+	}
+}
+
 func TestLoad_CustomPollInterval(t *testing.T) {
 	cfg, err := config.Load(fakeEnv(map[string]string{
 		"IDP_CONTROL_PLANE_URL": "http://localhost:8080",

@@ -33,6 +33,17 @@ func (q *Queries) CreateTenant(ctx context.Context, name string) (Tenant, error)
 	return i, err
 }
 
+const getSoleTenant = `-- name: GetSoleTenant :one
+SELECT id, name, created_at FROM tenants LIMIT 1
+`
+
+func (q *Queries) GetSoleTenant(ctx context.Context) (Tenant, error) {
+	row := q.db.QueryRowContext(ctx, getSoleTenant)
+	var i Tenant
+	err := row.Scan(&i.ID, &i.Name, &i.CreatedAt)
+	return i, err
+}
+
 const getTenant = `-- name: GetTenant :one
 SELECT id, name, created_at FROM tenants WHERE id = $1
 `
