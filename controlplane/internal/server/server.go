@@ -46,10 +46,11 @@ func loadConfig(getenv func(string) string) (config, error) {
 		return config{}, errors.New("DATABASE_URL is required")
 	}
 
-	cfg.listenAddr = getenv("LISTEN_ADDR")
-	if cfg.listenAddr == "" {
-		cfg.listenAddr = ":8080"
+	port := getenv("LISTEN_PORT")
+	if port == "" {
+		port = "8080"
 	}
+	cfg.listenAddr = ":" + port
 
 	return cfg, nil
 }
