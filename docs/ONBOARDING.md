@@ -11,13 +11,14 @@ The dependency chain is strict, and the first step exists because of a chicken-a
 2. Create tier IAM roles      (customer AWS — our Terraform module)
 3. Register Environment       (role ARNs + external ID → control plane)
 4. Deploy worker              (customer AWS account)
-5. Verify connectivity        (worker assumes each tier role)
-6. Create actors + teams      (humans, then agent identities)
-7. Wire one pipeline          (add our composite Action to one workflow)
-8. First governed run         (staging, Autonomous tier, unattended)
+5. Grant worker environments  (self-registered by default, or manual)
+6. Verify connectivity        (worker assumes each tier role)
+7. Create actors + teams      (humans, then agent identities)
+8. Wire one pipeline          (add our composite Action to one workflow)
+9. First governed run         (staging, Autonomous tier, unattended)
 ```
 
-Steps 1–5 are platform setup and happen once. Steps 6–8 repeat per team and per service.
+Steps 1–6 are platform setup and happen once. Steps 7–9 repeat per team and per service.
 
 ---
 
@@ -66,25 +67,42 @@ The control plane stores role ARNs, the external ID and the trust anchor. **It s
 
 ## 4. Deploy the worker
 
-A single binary, in the account and network where their CI and cloud live. It needs:
+A single binary. Where it runs depends on the customer's CI, not on how many AWS accounts they have — see [Decision 020](DECISIONS.md): one worker identity already assumes roles across every account it's been granted an `Environment` for, so account count is never the reason to place or duplicate a worker.
+
+- **Self-hosted CI** (their own runner fleet): deploy the worker in that same account/network, so it can reach the runners and the OIDC callback (step 8) stays internal.
+- **SaaS/cloud-hosted CI** (GitHub-hosted runners, Bitbucket Cloud Pipelines): the CI job runs on the provider's infrastructure, not the customer's network, so there's no private network requirement at all — deploy the worker wherever's operationally convenient (a shared-services account, one Kubernetes cluster), with its OIDC-callback endpoint exposed over TLS like any other webhook receiver. See [Decision 021](DECISIONS.md).
+
+Either way it needs:
 
 - Outbound reachability to the control plane (no inbound holes)
 - An identity matching the `trust_anchor` from step 2
 - Credentials for their CI system
-- Its own credential to authenticate to the control plane — not an actor token, since the worker never decides or takes a governed action itself:
+- Its own credential to authenticate to the control plane — not an actor token, since the worker never decides or takes a governed action itself
+
+**Default: the worker self-registers** ([Decision 022](DECISIONS.md)). The deployment (Helm chart, `docker-compose.yml`) generates a shared `WORKER_BOOTSTRAP_TOKEN` once and hands it to both the control plane and the worker, so bringing up the whole stack in one shot — no second command, no copying a token by hand — mints the worker its own credential automatically. It starts out scoped to **zero environments**, which is correct, not broken: it can authenticate and poll, but has nothing to do until step 5 below.
+
+The worker reads `IDP_WORKER_BOOTSTRAP_TOKEN`/`IDP_WORKER_BOOTSTRAP_TOKEN_FILE` plus `IDP_WORKER_NAME` (its own stable identity — two replicas must never share a name, since each bootstrap call rotates that name's token). It also needs `IDP_CONTROL_PLANE_URL` (required) and takes an optional `IDP_POLL_INTERVAL` (default `5s`).
+
+**Manual alternative**, still fully supported for anyone not using the shared-secret deployment path:
 
 ```bash
 idpctl worker enrol --name worker-staging --environments staging
 ```
 
-The output token is shown once and is the operator's own responsibility to get onto the worker, via whichever mechanism the customer's deployment already uses for secrets. The worker itself reads it from one of:
+The output token is shown once and is the operator's own responsibility to get onto the worker. The worker reads it from `IDP_WORKER_TOKEN` (the value directly) or `IDP_WORKER_TOKEN_FILE` (a path to read it from) — exactly one of the two, and neither combined with the bootstrap env vars above.
 
-- `IDP_WORKER_TOKEN` — the token value directly (a plain env var, or one a Kubernetes Secret injects)
-- `IDP_WORKER_TOKEN_FILE` — a path to read it from instead (a Docker secret, or a Kubernetes Secret mounted as a file)
+## 5. Grant the worker its environments
 
-Exactly one of the two must be set. The worker also needs `IDP_CONTROL_PLANE_URL` (required) and takes an optional `IDP_POLL_INTERVAL` (default `5s`).
+A self-registered worker (or one enrolled manually with a narrower scope) needs its environments attached before it can do anything. `idpctl worker enrol`/self-registration output the worker credential ID at the time — `idpctl worker list` finds it again later by the name you gave the worker (`IDP_WORKER_NAME`), so nobody has to go digging through worker startup logs:
 
-## 5. Verify connectivity
+```bash
+idpctl worker list
+idpctl worker grant-environment <worker-credential-id> --environments staging
+```
+
+This is also how a worker already in production gains access to a newly onboarded AWS account later — see [Decision 020](DECISIONS.md) — without being re-enrolled or redeployed: one call against the running instance, not a second deployment.
+
+## 6. Verify connectivity
 
 ```bash
 idpctl environment verify staging
@@ -92,7 +110,7 @@ idpctl environment verify staging
 
 The worker attempts `sts:AssumeRole` against each tier role and reports back. This is the first real proof the integration works, and it is the Phase 0 milestone.
 
-## 6. Create actors and teams
+## 7. Create actors and teams
 
 Teams first, since catalog entries need owners and approvals need routing.
 
@@ -110,7 +128,7 @@ The output token is short-lived and individually revocable. The mint is audited,
 
 Note that **an actor cannot grant an agent more authority than it holds itself**, so whoever runs this must already hold the tier being granted. See [AGENT-MODEL.md](AGENT-MODEL.md).
 
-## 7. Wire one pipeline
+## 8. Wire one pipeline
 
 The single step with real friction. Add our composite Action to one workflow so it fetches tier-scoped credentials from the control plane rather than assuming its own role:
 
@@ -125,7 +143,7 @@ The single step with real friction. Add our composite Action to one workflow so 
 
 Start with one non-production workflow. Do not ask anyone to convert their estate.
 
-## 8. First governed run
+## 9. First governed run
 
 Trigger an `Autonomous`-tier staging deploy as an agent. Confirm in the audit log:
 
@@ -156,5 +174,5 @@ Tracked honestly so it can be designed away rather than defended:
 |---|---|---|
 | 2 | Requires Terraform apply with elevated IAM permissions | Ship a CloudFormation one-click alternative |
 | 4 | A second thing to deploy and operate | Document running it as a sidecar to existing CI runners |
-| 7 | **Modifying an existing workflow** | Make the Action a single line; consider a read-only trial mode that proves value before requiring the change |
-| 6 | Manual token distribution to agents | MCP-based enrolment in Phase 2 |
+| 8 | **Modifying an existing workflow** | Make the Action a single line; consider a read-only trial mode that proves value before requiring the change |
+| 7 | Manual token distribution to agents | MCP-based enrolment in Phase 2 |

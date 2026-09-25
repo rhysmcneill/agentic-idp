@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: agentic_idp
+      # Local development password
+      POSTGRES_PASSWORD: agentic_idp # pragma: allowlist secret
+      POSTGRES_DB: agentic_idp
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentic_idp"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # One-shot: generates the shared worker bootstrap secret (Decision 022) on
+  # first run only, so controlplane and worker always read the same value.
+  bootstrap-secret:
+    image: alpine:3.20
+    command: sh -c "test -f /shared/worker-bootstrap-token || (head -c32 /dev/urandom | od -An -tx1 | tr -d ' \n' > /shared/worker-bootstrap-token)"
+    volumes:
+      - bootstrap-secret:/shared
+
+  controlplane:
+    build:
+      context: .
+      dockerfile: controlplane/docker/Dockerfile
+    environment:
+      DATABASE_URL: postgres://agentic_idp:agentic_idp@postgres:5432/agentic_idp?sslmode=disable # pragma: allowlist secret
+      LISTEN_PORT: "8080"
+      WORKER_BOOTSTRAP_TOKEN_FILE: /shared/worker-bootstrap-token
+    ports:
+      - "8080:8080"
+    volumes:
+      - bootstrap-secret:/shared:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      bootstrap-secret:
+        condition: service_completed_successfully
+    restart: on-failure
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/docker/Dockerfile
+    environment:
+      IDP_CONTROL_PLANE_URL: "http://controlplane:8080"
+      IDP_WORKER_BOOTSTRAP_TOKEN_FILE: /shared/worker-bootstrap-token
+      IDP_WORKER_NAME: worker-local
+    volumes:
+      - bootstrap-secret:/shared:ro
+    depends_on:
+      controlplane:
+        condition: service_started
+      bootstrap-secret:
+        condition: service_completed_successfully
+    restart: on-failure
+
+volumes:
+  postgres-data:
+  bootstrap-secret:

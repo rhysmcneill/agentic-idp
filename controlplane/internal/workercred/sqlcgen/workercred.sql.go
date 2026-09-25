@@ -53,6 +53,29 @@ func (q *Queries) GetWorkerCredential(ctx context.Context, id uuid.UUID) (Worker
 	return i, err
 }
 
+const getWorkerCredentialByTenantAndName = `-- name: GetWorkerCredentialByTenantAndName :one
+SELECT id, tenant_id, name, token_hash, created_at, revoked_at FROM worker_credentials WHERE tenant_id = $1 AND name = $2 AND revoked_at IS NULL
+`
+
+type GetWorkerCredentialByTenantAndNameParams struct {
+	TenantID uuid.UUID `json:"tenant_id"`
+	Name     string    `json:"name"`
+}
+
+func (q *Queries) GetWorkerCredentialByTenantAndName(ctx context.Context, arg GetWorkerCredentialByTenantAndNameParams) (WorkerCredential, error) {
+	row := q.db.QueryRowContext(ctx, getWorkerCredentialByTenantAndName, arg.TenantID, arg.Name)
+	var i WorkerCredential
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Name,
+		&i.TokenHash,
+		&i.CreatedAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
 const getWorkerCredentialByTokenHash = `-- name: GetWorkerCredentialByTokenHash :one
 SELECT id, tenant_id, name, token_hash, created_at, revoked_at FROM worker_credentials WHERE token_hash = $1 AND revoked_at IS NULL
 `
@@ -72,7 +95,9 @@ func (q *Queries) GetWorkerCredentialByTokenHash(ctx context.Context, tokenHash 
 }
 
 const grantWorkerCredentialEnvironment = `-- name: GrantWorkerCredentialEnvironment :exec
-INSERT INTO worker_credential_environments (worker_credential_id, environment_id) VALUES ($1, $2)
+INSERT INTO worker_credential_environments (worker_credential_id, environment_id)
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING
 `
 
 type GrantWorkerCredentialEnvironmentParams struct {
@@ -110,4 +135,61 @@ func (q *Queries) ListWorkerCredentialEnvironments(ctx context.Context, workerCr
 		return nil, err
 	}
 	return items, nil
+}
+
+const listWorkerCredentials = `-- name: ListWorkerCredentials :many
+SELECT id, tenant_id, name, token_hash, created_at, revoked_at FROM worker_credentials WHERE tenant_id = $1 ORDER BY name
+`
+
+func (q *Queries) ListWorkerCredentials(ctx context.Context, tenantID uuid.UUID) ([]WorkerCredential, error) {
+	rows, err := q.db.QueryContext(ctx, listWorkerCredentials, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WorkerCredential
+	for rows.Next() {
+		var i WorkerCredential
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Name,
+			&i.TokenHash,
+			&i.CreatedAt,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const rotateWorkerCredentialToken = `-- name: RotateWorkerCredentialToken :one
+UPDATE worker_credentials SET token_hash = $2 WHERE id = $1 RETURNING id, tenant_id, name, token_hash, created_at, revoked_at
+`
+
+type RotateWorkerCredentialTokenParams struct {
+	ID        uuid.UUID `json:"id"`
+	TokenHash string    `json:"token_hash"`
+}
+
+func (q *Queries) RotateWorkerCredentialToken(ctx context.Context, arg RotateWorkerCredentialTokenParams) (WorkerCredential, error) {
+	row := q.db.QueryRowContext(ctx, rotateWorkerCredentialToken, arg.ID, arg.TokenHash)
+	var i WorkerCredential
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Name,
+		&i.TokenHash,
+		&i.CreatedAt,
+		&i.RevokedAt,
+	)
+	return i, err
 }

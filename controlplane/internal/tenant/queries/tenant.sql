@@ -6,3 +6,6 @@ SELECT * FROM tenants WHERE id = $1;
 
 -- name: AnyTenantExists :one
 SELECT EXISTS (SELECT 1 FROM tenants) AS exists;
+
+-- name: GetSoleTenant :one
+SELECT * FROM tenants LIMIT 1;

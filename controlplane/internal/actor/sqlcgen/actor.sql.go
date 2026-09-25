@@ -112,6 +112,30 @@ func (q *Queries) GetActorByIdempotencyKey(ctx context.Context, arg GetActorById
 	return i, err
 }
 
+const getRootActor = `-- name: GetRootActor :one
+SELECT id, tenant_id, type, name, team_id, trust_tier, authorized_by, status, expires_at, created_at, revoked_at, idempotency_key FROM actors WHERE tenant_id = $1 AND authorized_by IS NULL
+`
+
+func (q *Queries) GetRootActor(ctx context.Context, tenantID uuid.UUID) (Actor, error) {
+	row := q.db.QueryRowContext(ctx, getRootActor, tenantID)
+	var i Actor
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Type,
+		&i.Name,
+		&i.TeamID,
+		&i.TrustTier,
+		&i.AuthorizedBy,
+		&i.Status,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.RevokedAt,
+		&i.IdempotencyKey,
+	)
+	return i, err
+}
+
 const grantActorEnvironment = `-- name: GrantActorEnvironment :exec
 INSERT INTO actor_environments (actor_id, environment_id) VALUES ($1, $2)
 `

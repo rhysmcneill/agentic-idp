@@ -11,10 +11,14 @@ DATE   ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 # change between local and CI use, only the tag passed to it does.
 TAG ?= $(shell git rev-parse --abbrev-ref HEAD | tr '/' '-')-$(COMMIT)
 
+# Target platforms for docker-buildx-*/publish.
+PLATFORMS ?= linux/amd64,linux/arm64
+
 .PHONY: build build-controlplane build-worker build-cli build-mcp \
 	docker-build-controlplane docker-build-worker docker-build-mcp docker-build-frontend \
+	docker-buildx-controlplane docker-buildx-worker docker-buildx-mcp docker-buildx-frontend \
 	publish test test-cover fmt fmt-check vet lint generate generate-check \
-	setup pre-commit-hooks-update ci
+	setup pre-commit-hooks-update ci e2e
 
 # ── build-* : compile a Go binary (go build, no Docker) ─────────────────────
 # Output goes to bin/. Fast inner dev loop: compiling, running a binary
@@ -35,26 +39,35 @@ build-cli:
 build-mcp:
 	go build -o bin/mcp-server ./mcp/cmd/mcp-server
 
-# ── docker-build-* : build a container image (docker build) ─────────────────
-# Runs `go build` *inside* the container via each service's Dockerfile — it
-# does not reuse bin/ from the build-* targets above. Requires a running
-# Docker daemon. Tagged with TAG (see above).
+# ── docker-build-* : single-arch, --load'ed for local use ───────────────────
 
 docker-build-controlplane:
-	docker build -t agentic-idp-controlplane:$(TAG) -f controlplane/docker/Dockerfile .
+	docker buildx build --load -t agentic-idp-controlplane:$(TAG) -f controlplane/docker/Dockerfile .
 
 docker-build-worker:
-	docker build -t agentic-idp-worker:$(TAG) -f worker/docker/Dockerfile .
+	docker buildx build --load -t agentic-idp-worker:$(TAG) -f worker/docker/Dockerfile .
 
 docker-build-mcp:
-	docker build -t agentic-idp-mcp:$(TAG) -f mcp/docker/Dockerfile .
+	docker buildx build --load -t agentic-idp-mcp:$(TAG) -f mcp/docker/Dockerfile .
 
 docker-build-frontend:
-	docker build -t agentic-idp-frontend:$(TAG) -f frontend/docker/Dockerfile .
+	docker buildx build --load -t agentic-idp-frontend:$(TAG) -f frontend/docker/Dockerfile .
 
-# Pushes images built by the docker-build-* targets above to the registry.
-# Publishing credentials are CI-only secrets scoped to main/tag-triggered
-# jobs — see CLAUDE.md CI/CD. Not runnable locally; CI is the only caller.
+# ── docker-buildx-* : multi-platform, CI/publish only (no --load) ───────────
+
+docker-buildx-controlplane:
+	docker buildx build --platform $(PLATFORMS) -t agentic-idp-controlplane:$(TAG) -f controlplane/docker/Dockerfile .
+
+docker-buildx-worker:
+	docker buildx build --platform $(PLATFORMS) -t agentic-idp-worker:$(TAG) -f worker/docker/Dockerfile .
+
+docker-buildx-mcp:
+	docker buildx build --platform $(PLATFORMS) -t agentic-idp-mcp:$(TAG) -f mcp/docker/Dockerfile .
+
+docker-buildx-frontend:
+	docker buildx build --platform $(PLATFORMS) -t agentic-idp-frontend:$(TAG) -f frontend/docker/Dockerfile .
+
+# publish pushes docker-buildx-* images to the registry. CI-only — see CLAUDE.md.
 publish:
 	@echo "publish is wired up in CI only — see .github/workflows/"
 
@@ -122,3 +135,9 @@ pre-commit-hooks-update:
 # build only; the docker-build-* targets are exercised by CI's separate
 # image-publishing job (from Phase 1 on), not this composite.
 ci: fmt-check vet lint generate-check test build
+
+# End-to-end proof of the Phase 0 milestone against the real images: docker
+# compose up, worker self-registers, assumes a real (emulated) tier role.
+# Same command locally and in CI. Requires a running Docker daemon.
+e2e:
+	./scripts/e2e.sh

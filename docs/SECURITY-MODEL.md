@@ -72,6 +72,7 @@ Its actual trust question is narrower and flatter: **is this the registered work
 - `idpctl worker enrol --environments staging,prod` mints a high-entropy opaque bearer token, shown once, and stores only a SHA-256 hash of it (`worker_credentials`) — not bcrypt: unlike the admin's bcrypt-hashed password in `controlplane/internal/credential` (decision 018), a bearer token carries no separate identifier (a username) to find its row by first, so it needs a deterministic, directly-indexable hash. The token's own entropy stands in for a salt.
 - A separate `requireWorkerAuth` middleware hashes the presented token and looks it up directly. It never touches `identity.Verifier`, and it gates only the worker-facing endpoints (poll for a job, report a result) — never a route `requireAuth` also serves.
 - The credential carries an environment scope, not a tier: the worker can only claim and report on verification jobs for environments it was granted, mirroring `actor_environments`' shape without inheriting its actor semantics.
+- That scope is a **set**, not a single environment: one worker credential can be granted many `Environment`s, including ones in different AWS accounts — a worker's authority is bounded by which environments it holds, never by how many AWS accounts exist. See [Decision 020](DECISIONS.md) and [WORKER-AWS-AUTH.md](WORKER-AWS-AUTH.md).
 
 This keeps the two auth mechanisms honest rather than overloading one to mean different things for different callers: `identity.Claims` for actors that take governed actions, `worker_credentials` for the worker proving it's the legitimate poller for a customer's environments.
 
@@ -86,7 +87,12 @@ This keeps the two auth mechanisms honest rather than overloading one to mean di
 3. Confirms the run is still in an executing state
 4. Mints credentials scoped to the **triggering actor's tier**, not the pipeline's own role
 
-The worker sits in the customer's account alongside their CI, so this inbound path is an internal boundary. The link that crosses a trust boundary — worker to control plane — remains outbound-only, and the control plane stays credential-free. That property matters most for a future hosted offering, where the control plane would sit outside the customer's boundary entirely.
+This inbound path's boundary depends on the customer's CI placement — see [Decision 021](DECISIONS.md), and both cases are equally first-class, not one a variant of the other:
+
+- **Self-hosted CI**: the worker sits alongside the customer's own runners, so this inbound path is an internal boundary.
+- **SaaS/cloud-hosted CI** (GitHub-hosted runners, Bitbucket Cloud Pipelines): the CI job runs on the provider's infrastructure, with no private network to share, so this inbound path is instead a **public-facing boundary**, terminated over TLS — the same trust assumption as any other public webhook receiver (Codecov, Snyk), not a weaker one.
+
+Either way, the link that crosses a trust boundary — worker to control plane — remains outbound-only, and the control plane stays credential-free. That property matters most for a future hosted offering, where the control plane would sit outside the customer's boundary entirely.
 
 **It must fail closed.** A pipeline whose run was denied, or which presents a correlation ID that does not match an approved run, receives nothing — it must not fall back to its own role. This is an explicit Phase 1 verification step.
 

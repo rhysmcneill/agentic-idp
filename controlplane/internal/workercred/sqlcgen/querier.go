@@ -13,9 +13,12 @@ import (
 type Querier interface {
 	CreateWorkerCredential(ctx context.Context, arg CreateWorkerCredentialParams) (WorkerCredential, error)
 	GetWorkerCredential(ctx context.Context, id uuid.UUID) (WorkerCredential, error)
+	GetWorkerCredentialByTenantAndName(ctx context.Context, arg GetWorkerCredentialByTenantAndNameParams) (WorkerCredential, error)
 	GetWorkerCredentialByTokenHash(ctx context.Context, tokenHash string) (WorkerCredential, error)
 	GrantWorkerCredentialEnvironment(ctx context.Context, arg GrantWorkerCredentialEnvironmentParams) error
 	ListWorkerCredentialEnvironments(ctx context.Context, workerCredentialID uuid.UUID) ([]uuid.UUID, error)
+	ListWorkerCredentials(ctx context.Context, tenantID uuid.UUID) ([]WorkerCredential, error)
+	RotateWorkerCredentialToken(ctx context.Context, arg RotateWorkerCredentialTokenParams) (WorkerCredential, error)
 }
 
 var _ Querier = (*Queries)(nil)

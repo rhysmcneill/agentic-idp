@@ -36,6 +36,10 @@ type Server struct {
 
 	issuer   *identity.Issuer
 	verifier *identity.Verifier
+
+	// workerBootstrapToken gates POST /v1/workers/bootstrap. Empty disables
+	// the route entirely — see EnableWorkerBootstrap.
+	workerBootstrapToken []byte
 }
 
 // NewServer constructs a Server. db is used both directly (for stores that
@@ -58,6 +62,13 @@ func NewServer(db *sql.DB, issuer *identity.Issuer, verifier *identity.Verifier)
 	}
 }
 
+// EnableWorkerBootstrap turns on POST /v1/workers/bootstrap, authenticated by
+// token instead of a session. Call it only with a non-empty token — leave it
+// uncalled to keep the route disabled, its default state.
+func (s *Server) EnableWorkerBootstrap(token string) {
+	s.workerBootstrapToken = []byte(token)
+}
+
 // Routes builds the HTTP handler for the whole API surface. Every route is
 // listed here, each wired to exactly the dependencies its handler needs.
 func (s *Server) Routes() http.Handler {
@@ -71,6 +82,14 @@ func (s *Server) Routes() http.Handler {
 		handlePostEnvironments(s.environments, s.audits)))
 	mux.Handle("POST /v1/workers", requireAuth(s.verifier, s.sessions,
 		handlePostWorkers(s.environments, s.workers, s.audits)))
+	mux.Handle("GET /v1/workers", requireAuth(s.verifier, s.sessions,
+		handleGetWorkers(s.environments, s.workers)))
+	mux.Handle("POST /v1/workers/{id}/environments", requireAuth(s.verifier, s.sessions,
+		handlePostWorkerGrantEnvironments(s.environments, s.workers, s.audits)))
+	if len(s.workerBootstrapToken) > 0 {
+		mux.Handle("POST /v1/workers/bootstrap",
+			handlePostWorkerBootstrap(s.workerBootstrapToken, s.tenants, s.actors, s.workers, s.audits))
+	}
 	mux.Handle("POST /v1/environments/{name}/verify", requireAuth(s.verifier, s.sessions,
 		handlePostEnvironmentVerify(s.environments, s.verifications, s.audits)))
 	mux.Handle("GET /v1/environments/{name}/verifications/{id}", requireAuth(s.verifier, s.sessions,
