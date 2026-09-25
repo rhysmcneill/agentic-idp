@@ -28,7 +28,7 @@ Deliberately tiny. No OIDC, no catalog, no frontend.
 - Codecov wired in alongside CI, establishing the coverage baseline before code accumulates that lowers it
 - Conventional commits adopted now, even though nothing consumes them yet — this is what makes semantic-release a drop-in later rather than a retrofit
 - **Dockerfiles for `controlplane` and `worker`**, plus `docker-compose.yml` for local dev — not deferred to Phase 3, because the Phase 0 milestone below is not real unless a customer can actually run these as containers
-- Add testing framework with ministack for aws emulation for E2E testing
+- Add testing framework with [Floci](https://github.com/floci-io/floci) for AWS emulation in E2E testing — MIT-licensed, LocalStack-compatible, full IAM/STS (`AssumeRole` included), with matching Azure/GCP/OCI siblings that fit the `pkg/cloud.Broker` interface's multi-provider story (decision 017) if those providers are ever added
 
 **Milestone** — a mock agent carrying a bound delegation claim triggers a no-op job that a customer-run **containerised** worker executes by assuming a real tier role.
 

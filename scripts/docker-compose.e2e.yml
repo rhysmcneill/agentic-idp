@@ -1,0 +1,16 @@
+# Overlay for `make e2e` only — adds Floci (AWS emulation) and points the worker
+services:
+  floci:
+    image: floci/floci:latest
+    ports:
+      - "4566:4566"
+
+  worker:
+    environment:
+      AWS_ENDPOINT_URL: "http://floci:4566"
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test # pragma: allowlist secret
+      AWS_DEFAULT_REGION: us-east-1
+    depends_on:
+      floci:
+        condition: service_started

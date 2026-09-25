@@ -18,7 +18,7 @@ PLATFORMS ?= linux/amd64,linux/arm64
 	docker-build-controlplane docker-build-worker docker-build-mcp docker-build-frontend \
 	docker-buildx-controlplane docker-buildx-worker docker-buildx-mcp docker-buildx-frontend \
 	publish test test-cover fmt fmt-check vet lint generate generate-check \
-	setup pre-commit-hooks-update ci
+	setup pre-commit-hooks-update ci e2e
 
 # ── build-* : compile a Go binary (go build, no Docker) ─────────────────────
 # Output goes to bin/. Fast inner dev loop: compiling, running a binary
@@ -135,3 +135,9 @@ pre-commit-hooks-update:
 # build only; the docker-build-* targets are exercised by CI's separate
 # image-publishing job (from Phase 1 on), not this composite.
 ci: fmt-check vet lint generate-check test build
+
+# End-to-end proof of the Phase 0 milestone against the real images: docker
+# compose up, worker self-registers, assumes a real (emulated) tier role.
+# Same command locally and in CI. Requires a running Docker daemon.
+e2e:
+	./scripts/e2e.sh
