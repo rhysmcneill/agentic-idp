@@ -20,7 +20,7 @@ services:
   # first run only, so controlplane and worker always read the same value.
   bootstrap-secret:
     image: alpine:3.20
-    command: sh -c "test -f /shared/worker-bootstrap-token || (head -c32 /dev/urandom | od -An -tx1 | tr -d ' \n' > /shared/worker-bootstrap-token)"
+    command: sh -c "test -f /shared/worker-bootstrap-token || (head -c32 /dev/urandom | od -An -tx1 | tr -d '[:space:]' > /shared/worker-bootstrap-token)"
     volumes:
       - bootstrap-secret:/shared
 
