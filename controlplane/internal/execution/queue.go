@@ -33,7 +33,7 @@ type JobArgs struct {
 // Kind implements river.JobArgs.
 func (JobArgs) Kind() string { return "run" }
 
-// Worker moves a queued Run to StatusExecuting; see Work for why this PR's hand-off is a deliberate stub.
+// Worker moves a queued Run to StatusExecuting;
 type Worker struct {
 	river.WorkerDefaults[JobArgs]
 	store    *Store
@@ -44,7 +44,6 @@ type Worker struct {
 func (w *Worker) Timeout(*river.Job[JobArgs]) time.Duration { return runJobTimeout }
 
 // Work claims the Run, re-checks policy as the credential-mint gate (issue #3), then resolves a pkg/ci.Adapter;
-// no adapter is registered in this PR, so it deliberately fails closed rather than dispatching (next PR: GitHub Actions adapter).
 func (w *Worker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 	claimed, err := w.store.transitionStatus(ctx, job.Args.RunID, StatusQueued, StatusExecuting)
 	if errors.Is(err, sql.ErrNoRows) {
