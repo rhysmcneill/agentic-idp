@@ -186,7 +186,7 @@ This is deliberately **not** the Phase 1 run state machine ([ARCHITECTURE.md](AR
 
 ### `pipelines`
 
-> **Not named in `ARCHITECTURE.md`'s Data model list.** That doc names `Binding` as the `entity ↔ environment ↔ pipeline` three-way relation but doesn't give "pipeline" its own row — this table is this doc's proposal for where a `pkg/ci.Config` (provider + settings) actually lives, and should be confirmed rather than treated as settled design.
+> **Not named in `ARCHITECTURE.md`'s Data model list.** That doc names `Binding` as the `entity ↔ environment ↔ pipeline` three-way relation but doesn't give "pipeline" its own row — this table is this doc's proposal for where a `pkg/ci.Config` (provider + settings) actually lives. Confirmed and implemented in migration `0006_runs_and_approvals`.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -196,6 +196,7 @@ This is deliberately **not** the Phase 1 run state machine ([ARCHITECTURE.md](AR
 | `provider` | `text` NOT NULL | mirrors `pkg/ci.Provider` (`github_actions`, `gitlab_ci`, `jenkins`, `atlantis`, `bitbucket_pipelines`) |
 | `workflow_ref` | `text` NOT NULL | e.g. a GitHub Actions workflow file path |
 | `settings` | `jsonb` NOT NULL DEFAULT `'{}'` | mirrors `pkg/ci.Config.Settings` — provider-specific, deliberately loose since each adapter defines its own required keys via `Config.Require` |
+| `mutating` | `boolean` NOT NULL DEFAULT `true` | whether this pipeline can change the environment. Drives the `ReadOnly` tier's policy check ([SECURITY-MODEL.md](SECURITY-MODEL.md)): `ReadOnly` may trigger a non-mutating pipeline (e.g. `terraform plan`) unattended, never a mutating one |
 | `created_at` | `timestamptz` NOT NULL DEFAULT `now()` | |
 
 `pkg/ci.Config.Credential` is explicitly **never persisted** by the control plane (resolved by the worker immediately before use — see `pkg/ci/types.go`), so no credential column exists here by design.

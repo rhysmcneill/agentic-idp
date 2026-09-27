@@ -19,12 +19,21 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/api"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/db"
+	"github.com/rhysmcneill/agentic-idp/controlplane/internal/execution"
+	"github.com/rhysmcneill/agentic-idp/controlplane/internal/pipeline"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/session"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/signingkey"
+	"github.com/rhysmcneill/agentic-idp/pkg/ci"
 	"github.com/rhysmcneill/agentic-idp/pkg/identity"
 )
+
+// riverMaxWorkers bounds concurrent run dispatch per control-plane replica.
+// Not configurable yet — no deployment has approached this ceiling.
+const riverMaxWorkers = 10
 
 // sessionPruneInterval is how often expired revoked_sessions rows are
 // cleaned up. Not configurable yet — the rows are inert once past their
@@ -121,6 +130,30 @@ func Run(parent context.Context, getenv func(string) string) error {
 	if cfg.workerBootstrapToken != "" {
 		srv.EnableWorkerBootstrap(cfg.workerBootstrapToken)
 	}
+
+	// River needs a pgxpool.Pool; the rest of the control plane uses
+	// database/sql over the same DSN (see controlplane/internal/db) — two
+	// handles to the same database, not two databases.
+	pool, err := pgxpool.New(ctx, cfg.databaseURL)
+	if err != nil {
+		return fmt.Errorf("connecting river pool: %w", err)
+	}
+	defer pool.Close()
+
+	// No adapter registered in this PR: the GitHub Actions adapter is a
+	// separate follow-up (see Decision 023) — a run that reaches executing
+	// fails closed to failed rather than dispatching, by design.
+	adapters := ci.NewRegistry()
+	pipelines := pipeline.NewStore(conn)
+	runs, riverClient, err := execution.NewQueueClient(conn, pipelines, adapters, pool, riverMaxWorkers)
+	if err != nil {
+		return fmt.Errorf("building run queue: %w", err)
+	}
+	if err := riverClient.Start(ctx); err != nil {
+		return fmt.Errorf("starting run queue: %w", err)
+	}
+	defer func() { _ = riverClient.Stop(context.Background()) }()
+	srv.EnableExecution(runs)
 
 	go pruneExpiredSessions(ctx, conn)
 

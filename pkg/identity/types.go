@@ -39,7 +39,7 @@ type Tier int
 
 // The trust tiers, in ascending order of unsupervised authority.
 const (
-	TierReadOnly       Tier = 1 // no action authority
+	TierReadOnly       Tier = 1 // no mutating-action authority; may trigger non-mutating actions unattended
 	TierHumanInTheLoop Tier = 2 // may propose; a human approves each action before execution
 	TierAutonomous     Tier = 3 // acts unattended within its granted environments; monitored and revocable after the fact
 )

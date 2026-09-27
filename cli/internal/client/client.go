@@ -294,3 +294,100 @@ func (c *Client) do(ctx context.Context, method, path, token string, body, out a
 	}
 	return nil
 }
+
+// CreatePipelineRequest is POST /v1/pipelines' request body. Mutating is a
+// pointer so an unset flag lets the control plane apply its own default
+// (true) rather than the CLI silently sending false.
+type CreatePipelineRequest struct {
+	EnvironmentID string            `json:"environment_id"`
+	Provider      string            `json:"provider"`
+	WorkflowRef   string            `json:"workflow_ref"`
+	Settings      map[string]string `json:"settings,omitempty"`
+	Mutating      *bool             `json:"mutating,omitempty"`
+}
+
+// PipelineResponse is both POST /v1/pipelines' and GET /v1/pipelines/{id}'s
+// response body.
+type PipelineResponse struct {
+	PipelineID    string            `json:"pipeline_id"`
+	EnvironmentID string            `json:"environment_id"`
+	Provider      string            `json:"provider"`
+	WorkflowRef   string            `json:"workflow_ref"`
+	Settings      map[string]string `json:"settings,omitempty"`
+	Mutating      bool              `json:"mutating"`
+}
+
+// CreatePipeline registers a new pipeline, authenticated as token.
+func (c *Client) CreatePipeline(ctx context.Context, token string, req CreatePipelineRequest) (PipelineResponse, error) {
+	var resp PipelineResponse
+	if err := c.do(ctx, http.MethodPost, "/v1/pipelines", token, req, &resp); err != nil {
+		return PipelineResponse{}, err
+	}
+	return resp, nil
+}
+
+// GetPipeline returns a single pipeline by ID, authenticated as token.
+func (c *Client) GetPipeline(ctx context.Context, token, pipelineID string) (PipelineResponse, error) {
+	var resp PipelineResponse
+	if err := c.do(ctx, http.MethodGet, "/v1/pipelines/"+pipelineID, token, nil, &resp); err != nil {
+		return PipelineResponse{}, err
+	}
+	return resp, nil
+}
+
+// CreateRunRequest is POST /v1/runs' request body. Tier is never a field
+// here — it comes from the caller's verified token claims, not the request.
+type CreateRunRequest struct {
+	EnvironmentID  string `json:"environment_id"`
+	PipelineID     string `json:"pipeline_id"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	DiffRef        string `json:"diff_ref,omitempty"`
+}
+
+// RunResponse is POST /v1/runs', GET /v1/runs/{id}'s and
+// POST /v1/runs/{id}/decision's response body.
+type RunResponse struct {
+	RunID         string `json:"run_id"`
+	EnvironmentID string `json:"environment_id"`
+	PipelineID    string `json:"pipeline_id"`
+	Tier          string `json:"tier"`
+	Status        string `json:"status"`
+}
+
+// RequestRun creates a new run, authenticated as token. Returns immediately
+// per the async run model — poll GetRun for its status.
+func (c *Client) RequestRun(ctx context.Context, token string, req CreateRunRequest) (RunResponse, error) {
+	var resp RunResponse
+	if err := c.do(ctx, http.MethodPost, "/v1/runs", token, req, &resp); err != nil {
+		return RunResponse{}, err
+	}
+	return resp, nil
+}
+
+// GetRun returns a single run by ID, authenticated as token.
+func (c *Client) GetRun(ctx context.Context, token, runID string) (RunResponse, error) {
+	var resp RunResponse
+	if err := c.do(ctx, http.MethodGet, "/v1/runs/"+runID, token, nil, &resp); err != nil {
+		return RunResponse{}, err
+	}
+	return resp, nil
+}
+
+// decideRunRequest is POST /v1/runs/{id}/decision's request body.
+type decideRunRequest struct {
+	Decision string `json:"decision"`
+}
+
+// DecideRun records an approve/deny decision on a run awaiting approval,
+// authenticated as token.
+func (c *Client) DecideRun(ctx context.Context, token, runID string, approved bool) (RunResponse, error) {
+	decision := "denied"
+	if approved {
+		decision = "approved"
+	}
+	var resp RunResponse
+	if err := c.do(ctx, http.MethodPost, "/v1/runs/"+runID+"/decision", token, decideRunRequest{Decision: decision}, &resp); err != nil {
+		return RunResponse{}, err
+	}
+	return resp, nil
+}

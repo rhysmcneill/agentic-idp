@@ -4,6 +4,11 @@
 # lint`) so contributors run the same checks locally that CI runs on every
 # PR.
 
+# Vendored/managed files (e.g. Claude Code skill bundles) aren't ours to
+# reformat — pre-commit-hooks' whitespace fixers have no file-type filter and
+# will otherwise rewrite them, breaking the skill's own integrity checks.
+exclude: '^\.claude/skills/'
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0

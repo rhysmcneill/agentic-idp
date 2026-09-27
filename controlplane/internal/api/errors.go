@@ -22,6 +22,7 @@ const (
 	codeNotFound       = "not_found"
 	codeConflict       = "conflict"
 	codeGone           = "gone"
+	codePolicyDenied   = "policy_denied"
 	codeInternal       = "internal"
 )
 

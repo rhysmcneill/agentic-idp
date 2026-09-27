@@ -6,11 +6,61 @@ package sqlcgen
 
 import (
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+type RiverJobState string
+
+const (
+	RiverJobStateAvailable RiverJobState = "available"
+	RiverJobStateCancelled RiverJobState = "cancelled"
+	RiverJobStateCompleted RiverJobState = "completed"
+	RiverJobStateDiscarded RiverJobState = "discarded"
+	RiverJobStatePending   RiverJobState = "pending"
+	RiverJobStateRetryable RiverJobState = "retryable"
+	RiverJobStateRunning   RiverJobState = "running"
+	RiverJobStateScheduled RiverJobState = "scheduled"
+)
+
+func (e *RiverJobState) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RiverJobState(s)
+	case string:
+		*e = RiverJobState(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RiverJobState: %T", src)
+	}
+	return nil
+}
+
+type NullRiverJobState struct {
+	RiverJobState RiverJobState `json:"river_job_state"`
+	Valid         bool          `json:"valid"` // Valid is true if RiverJobState is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRiverJobState) Scan(value interface{}) error {
+	if value == nil {
+		ns.RiverJobState, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RiverJobState.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRiverJobState) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RiverJobState), nil
+}
 
 type Actor struct {
 	ID             uuid.UUID      `json:"id"`
@@ -30,6 +80,15 @@ type Actor struct {
 type ActorEnvironment struct {
 	ActorID       uuid.UUID `json:"actor_id"`
 	EnvironmentID uuid.UUID `json:"environment_id"`
+}
+
+type Approval struct {
+	ID              uuid.UUID      `json:"id"`
+	RunID           uuid.UUID      `json:"run_id"`
+	RequestedAt     time.Time      `json:"requested_at"`
+	ApproverActorID uuid.NullUUID  `json:"approver_actor_id"`
+	Decision        sql.NullString `json:"decision"`
+	DecidedAt       sql.NullTime   `json:"decided_at"`
 }
 
 type AuditEvent struct {
@@ -87,11 +146,92 @@ type LocalUser struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+type Pipeline struct {
+	ID            uuid.UUID       `json:"id"`
+	TenantID      uuid.UUID       `json:"tenant_id"`
+	EnvironmentID uuid.UUID       `json:"environment_id"`
+	Provider      string          `json:"provider"`
+	WorkflowRef   string          `json:"workflow_ref"`
+	Settings      json.RawMessage `json:"settings"`
+	Mutating      bool            `json:"mutating"`
+	CreatedAt     time.Time       `json:"created_at"`
+}
+
 type RevokedSession struct {
 	Jti       uuid.UUID `json:"jti"`
 	ActorID   uuid.UUID `json:"actor_id"`
 	RevokedAt time.Time `json:"revoked_at"`
 	ExpiresAt time.Time `json:"expires_at"`
+}
+
+type RiverJob struct {
+	ID           int64             `json:"id"`
+	State        RiverJobState     `json:"state"`
+	Attempt      int16             `json:"attempt"`
+	MaxAttempts  int16             `json:"max_attempts"`
+	AttemptedAt  sql.NullTime      `json:"attempted_at"`
+	CreatedAt    time.Time         `json:"created_at"`
+	FinalizedAt  sql.NullTime      `json:"finalized_at"`
+	ScheduledAt  time.Time         `json:"scheduled_at"`
+	Priority     int16             `json:"priority"`
+	Args         json.RawMessage   `json:"args"`
+	AttemptedBy  []string          `json:"attempted_by"`
+	Errors       []json.RawMessage `json:"errors"`
+	Kind         string            `json:"kind"`
+	Metadata     json.RawMessage   `json:"metadata"`
+	Queue        string            `json:"queue"`
+	Tags         []string          `json:"tags"`
+	UniqueKey    []byte            `json:"unique_key"`
+	UniqueStates interface{}       `json:"unique_states"`
+}
+
+type RiverLeader struct {
+	ElectedAt time.Time `json:"elected_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+	LeaderID  string    `json:"leader_id"`
+	Name      string    `json:"name"`
+}
+
+type RiverMigration struct {
+	ID        int64     `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	Version   int64     `json:"version"`
+}
+
+type RiverNotification struct {
+	ID        int64     `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	Payload   string    `json:"payload"`
+	Topic     string    `json:"topic"`
+}
+
+type RiverQueue struct {
+	Name      string          `json:"name"`
+	CreatedAt time.Time       `json:"created_at"`
+	Metadata  json.RawMessage `json:"metadata"`
+	PausedAt  sql.NullTime    `json:"paused_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
+}
+
+type Run struct {
+	ID             uuid.UUID      `json:"id"`
+	TenantID       uuid.UUID      `json:"tenant_id"`
+	ActorID        uuid.UUID      `json:"actor_id"`
+	EnvironmentID  uuid.UUID      `json:"environment_id"`
+	BindingID      uuid.NullUUID  `json:"binding_id"`
+	PipelineID     uuid.UUID      `json:"pipeline_id"`
+	Tier           int16          `json:"tier"`
+	Status         string         `json:"status"`
+	CiProvider     string         `json:"ci_provider"`
+	CiExternalRef  sql.NullString `json:"ci_external_ref"`
+	CiRawStatus    sql.NullString `json:"ci_raw_status"`
+	CiUrl          sql.NullString `json:"ci_url"`
+	IdempotencyKey sql.NullString `json:"idempotency_key"`
+	DiffRef        sql.NullString `json:"diff_ref"`
+	RequestedAt    time.Time      `json:"requested_at"`
+	StartedAt      sql.NullTime   `json:"started_at"`
+	FinishedAt     sql.NullTime   `json:"finished_at"`
+	CreatedAt      time.Time      `json:"created_at"`
 }
 
 type SigningKey struct {

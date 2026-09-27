@@ -60,7 +60,7 @@ The differentiator. This is the phase to validate with design partners.
 **Milestone** — demoable as *"governed agent access to the pipelines you already run."*
 
 **Verification**
-- Two tiers configured: `Autonomous` (acts unattended, no pre-approval) and `HumanInTheLoop` (a human approves each action before it executes) — tier is independent of environment, not "staging vs production" (see [SECURITY-MODEL.md](SECURITY-MODEL.md))
+- Three tiers configured: `ReadOnly` (no mutating-action authority; may trigger non-mutating actions unattended), `Autonomous` (acts unattended, no pre-approval) and `HumanInTheLoop` (a human approves each action before it executes) — tier is independent of environment, not "staging vs production" (see [SECURITY-MODEL.md](SECURITY-MODEL.md))
 - A human action and an agent action both traverse the full path correctly
 - The pipeline receives **tier-scoped** credentials via OIDC callback
 - **A denied tier fails closed** — the pipeline does not fall back to its own role
@@ -153,7 +153,7 @@ A **monospace family is first-class, not an afterthought.** Role ARNs, run IDs, 
 
 #### Surfaces, in priority order
 
-1. **Approval queue with diffs** — the highest-stakes surface in the product. A human approving a production change is making a safety decision, often under time pressure. **Diff legibility is a safety property, not an aesthetic one**: if the approver cannot see what is changing at a glance, the governance model has a human-factors hole that no amount of policy enforcement closes. Design this first and hardest.
+1. **Approval queue with diffs** — the highest-stakes surface in the product. A human approving a production change is making a safety decision, often under time pressure. **Diff legibility is a safety property, not an aesthetic one**: if the approver cannot see what is changing at a glance, the governance model has a human-factors hole that no amount of policy enforcement closes. Design this first and hardest. A new pending approval should reach this view without a manual refresh — push it over SSE fed by the same control-plane `LISTEN`/`NOTIFY` fan-out that dispatches jobs to the worker (see [Decision 023](DECISIONS.md)), rather than inventing a second mechanism.
 2. **Audit and attribution views** — dense, high-volume tabular data. `layout` and `typeset` carry most of the weight; the job is making "who did what, under what authority" reconstructable at a glance.
 3. **Agent enrolment and management** — registering agents, setting tier and environment scope, rotating and revoking tokens. Enrolment is a **first-class UI workflow, not CLI-only**: the person authorising an agent is often a team lead who does not live in a terminal, and this belongs beside the approval and audit surfaces. The grant screen must state what authority is being given in plain language — nobody should have to infer what `Autonomous` means from a bare number. See [AGENT-MODEL.md](AGENT-MODEL.md).
 4. **Catalog browser** — what exists, who owns it, what can be done to it.
