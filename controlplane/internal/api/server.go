@@ -9,6 +9,8 @@ import (
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/audit"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/credential"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/environment"
+	"github.com/rhysmcneill/agentic-idp/controlplane/internal/execution"
+	"github.com/rhysmcneill/agentic-idp/controlplane/internal/pipeline"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/session"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/team"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/tenant"
@@ -33,6 +35,7 @@ type Server struct {
 	sessions      *session.Store
 	workers       *workercred.Store
 	verifications *verification.Store
+	pipelines     *pipeline.Store
 
 	issuer   *identity.Issuer
 	verifier *identity.Verifier
@@ -40,6 +43,12 @@ type Server struct {
 	// workerBootstrapToken gates POST /v1/workers/bootstrap. Empty disables
 	// the route entirely — see EnableWorkerBootstrap.
 	workerBootstrapToken []byte
+
+	// runs is nil until EnableExecution is called, which gates the
+	// runs/decision routes the same way workerBootstrapToken gates worker
+	// bootstrap — its River client needs a pgxpool.Pool this package doesn't
+	// otherwise construct, so server.Run builds it and wires it in.
+	runs *execution.Store
 }
 
 // NewServer constructs a Server. db is used both directly (for stores that
@@ -57,9 +66,18 @@ func NewServer(db *sql.DB, issuer *identity.Issuer, verifier *identity.Verifier)
 		sessions:      session.NewStore(db),
 		workers:       workercred.NewStore(db),
 		verifications: verification.NewStore(db),
+		pipelines:     pipeline.NewStore(db),
 		issuer:        issuer,
 		verifier:      verifier,
 	}
+}
+
+// EnableExecution turns on the runs/decision routes, backed by runs (built
+// by server.Run over its own River-connected pgxpool.Pool — see
+// controlplane/internal/execution.NewQueueClient). Leave it uncalled to keep
+// the routes disabled, its default state, e.g. in tests that don't need them.
+func (s *Server) EnableExecution(runs *execution.Store) {
+	s.runs = runs
 }
 
 // EnableWorkerBootstrap turns on POST /v1/workers/bootstrap, authenticated by
@@ -98,5 +116,17 @@ func (s *Server) Routes() http.Handler {
 		handleGetNextWorkerVerification(s.environments, s.verifications)))
 	mux.Handle("POST /v1/worker/verifications/{id}/result", requireWorkerAuth(s.workers,
 		handlePostWorkerVerificationResult(s.verifications)))
+	mux.Handle("POST /v1/pipelines", requireAuth(s.verifier, s.sessions,
+		handlePostPipelines(s.environments, s.pipelines)))
+	mux.Handle("GET /v1/pipelines/{id}", requireAuth(s.verifier, s.sessions,
+		handleGetPipeline(s.pipelines)))
+	if s.runs != nil {
+		mux.Handle("POST /v1/runs", requireAuth(s.verifier, s.sessions,
+			handlePostRuns(s.environments, s.runs, s.audits)))
+		mux.Handle("GET /v1/runs/{id}", requireAuth(s.verifier, s.sessions,
+			handleGetRun(s.runs)))
+		mux.Handle("POST /v1/runs/{id}/decision", requireAuth(s.verifier, s.sessions,
+			handlePostRunDecision(s.runs, s.audits)))
+	}
 	return mux
 }

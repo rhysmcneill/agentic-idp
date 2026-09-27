@@ -38,7 +38,7 @@ The tier scale is a **ceiling of unsupervised trust**: higher means more trusted
 
 | Tier | Name | Authority |
 |---|---|---|
-| 1 | `ReadOnly` | No action authority; inspect catalog, runs, audit |
+| 1 | `ReadOnly` | No mutating-action authority; may trigger non-mutating actions unattended (e.g. `terraform plan`, drift/read scans), plus inspect catalog, runs, audit |
 | 2 | `HumanInTheLoop` | May propose; a human approves **each action before** it executes |
 | 3 | `Autonomous` | Acts unattended within its granted environments — no pre-approval, but monitored and revocable after the fact |
 

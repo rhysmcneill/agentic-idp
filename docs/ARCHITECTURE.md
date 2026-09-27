@@ -102,7 +102,11 @@ requested → policy_checked → awaiting_approval → queued → executing
 
 Durable run records, incremental log capture, cancellation, timeouts, idempotency keys. The REST API, CLI and MCP tools all return a run ID and poll.
 
+`queued → executing` is where the run record hands off to River (see [Decision 023](DECISIONS.md)): the control plane enqueues a River job on transition to `queued`, and the registered worker function bridges to the remote worker's existing long-poll claim / result-report HTTP calls rather than executing anything in-process — the worker never gains direct Postgres access.
+
 Approvals attach to a run. **The approver must see the change diff** — which promotes log capture from a nice-to-have to load-bearing infrastructure.
+
+`idpctl pipeline create/get` and `idpctl run request/get/approve/deny` are today's only clients of `POST/GET /v1/pipelines` and `POST/GET /v1/runs`, `POST /v1/runs/{id}/decision` — the Slack-webhook half of the approval workflow ([V1-ROADMAP.md](V1-ROADMAP.md) Phase 1) becomes a second client of the same decision endpoint, the same pattern `idpctl environment verify` already established above.
 
 ## CI integration
 
@@ -251,7 +255,7 @@ Native `TerraformExecutor` and `K8sExecutor` are additive behind the same interf
 |---|---|---|
 | Control plane, worker, CLI | Go 1.27 | Single module at root; split only if genuinely needed |
 | API | REST, OpenAPI-documented | Plus the async run model |
-| Job queue | Postgres-backed (`FOR UPDATE SKIP LOCKED`, or River) | Avoid adding Kafka/NATS |
+| Job queue | Postgres-backed via [River](https://riverqueue.com) | See [Decision 023](DECISIONS.md); avoid adding Kafka/NATS |
 | Policy | **Typed trust tiers in Go for v1**; OPA/Rego from Phase 2 | Rego is a real learning curve; typed tiers ship faster and lose no optionality |
 | Database | PostgreSQL | |
 | Frontend | React + TypeScript (Vite) | Phase 3 |
