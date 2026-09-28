@@ -45,7 +45,7 @@ The differentiator. This is the phase to validate with design partners.
 
 - Typed trust tiers; policy check on every action **and every credential mint**
 - Run state machine and Postgres-backed job queue
-- Approval workflow (CLI + Slack webhook)
+- Approval workflow (CLI only — see Phase 2 for the Slack webhook half, deferred until OIDC gives human actors a verified identity to link a Slack account against)
 - **GitHub Actions adapter only**, behind the generic `pkg/ci` interface
 - CI OIDC callback (`internal/ciauth`): verify token, match correlation, broker tier-scoped credentials — built for both self-hosted and SaaS/cloud-hosted CI from the start (an internal callback for the former, a public TLS-terminated one for the latter), per [Decision 021](DECISIONS.md), not the self-hosted case alone with SaaS retrofitted later
 - Per-run cost capture
@@ -82,6 +82,7 @@ The differentiator. This is the phase to validate with design partners.
 - OIDC for human authentication
     - Allow humans to login to be "users" of the product
     - Give human users permissions to use the app when they login - we should decide how initial users permissions are structured and also how they can get elevated permissions.
+- Slack webhook half of the approval workflow (deferred from Phase 1) — links a Slack user to a verified human `Actor` identity now that OIDC exists, rather than a bespoke pre-OIDC admin-linked mapping; Slack becomes a second client of `POST /v1/runs/{id}/decision`, notifying and letting an approver decide, with the diff itself reviewed via a link out (e.g. the GitHub PR) rather than rendered in Slack
 - OPA as the custom-policy escape hatch
 - Extract the Apache 2.0 identity/audit library
 

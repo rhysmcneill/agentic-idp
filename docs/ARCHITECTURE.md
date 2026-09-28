@@ -106,7 +106,7 @@ Durable run records, incremental log capture, cancellation, timeouts, idempotenc
 
 Approvals attach to a run. **The approver must see the change diff** — which promotes log capture from a nice-to-have to load-bearing infrastructure.
 
-`idpctl pipeline create/get` and `idpctl run request/get/approve/deny` are today's only clients of `POST/GET /v1/pipelines` and `POST/GET /v1/runs`, `POST /v1/runs/{id}/decision` — the Slack-webhook half of the approval workflow ([V1-ROADMAP.md](V1-ROADMAP.md) Phase 1) becomes a second client of the same decision endpoint, the same pattern `idpctl environment verify` already established above.
+`idpctl pipeline create/get` and `idpctl run request/get/approve/deny` are today's only clients of `POST/GET /v1/pipelines` and `POST/GET /v1/runs`, `POST /v1/runs/{id}/decision` — the Slack-webhook half of the approval workflow ([V1-ROADMAP.md](V1-ROADMAP.md) Phase 2, deferred until OIDC gives human actors a verified identity to link a Slack account against) becomes a second client of the same decision endpoint, the same pattern `idpctl environment verify` already established above.
 
 ## CI integration
 
