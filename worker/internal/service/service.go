@@ -6,16 +6,22 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/rhysmcneill/agentic-idp/pkg/ci/githubactions"
 	"github.com/rhysmcneill/agentic-idp/worker/internal/broker/aws"
+	"github.com/rhysmcneill/agentic-idp/worker/internal/ciauth"
+	"github.com/rhysmcneill/agentic-idp/worker/internal/ciauth/githuboidc"
 	"github.com/rhysmcneill/agentic-idp/worker/internal/config"
 	"github.com/rhysmcneill/agentic-idp/worker/internal/controlplane"
+	"github.com/rhysmcneill/agentic-idp/worker/internal/githubapp"
 	"github.com/rhysmcneill/agentic-idp/worker/internal/poller"
 )
 
@@ -60,8 +66,47 @@ func Run(parent context.Context, getenv func(string) string) error {
 	}
 	cp := controlplane.New(cfg.ControlPlaneURL, token)
 
+	adapter := githubactions.New()
+
+	var resolver *githubapp.Resolver
+	if cfg.GitHubAppID != "" {
+		resolver, err = githubapp.New(cfg.GitHubAppID, cfg.GitHubAppKey)
+		if err != nil {
+			return fmt.Errorf("constructing github app credential resolver: %w", err)
+		}
+
+		verifier, err := githuboidc.New(ctx, cfg.CICallbackURL)
+		if err != nil {
+			return fmt.Errorf("constructing github oidc verifier: %w", err)
+		}
+		httpServer := &http.Server{
+			Addr:              cfg.CIListenAddr,
+			Handler:           ciauth.NewHandler(ciauth.NewRegistry(verifier), cp, broker, adapter, resolver),
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+		go func() {
+			if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				slog.Error("ci oidc callback server failed", "error", err)
+			}
+		}()
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = httpServer.Shutdown(shutdownCtx)
+		}()
+		slog.Info("ci oidc callback listening", "addr", cfg.CIListenAddr, "callback_url", cfg.CICallbackURL)
+
+		if err := cp.RegisterCICallback(ctx, cfg.CICallbackURL); err != nil {
+			return fmt.Errorf("registering ci callback url: %w", err)
+		}
+	}
+
 	slog.Info("worker starting", "control_plane", cfg.ControlPlaneURL, "poll_interval", cfg.PollInterval)
-	poller.Run(ctx, cp, broker, cfg.PollInterval)
+	if resolver != nil {
+		poller.Run(ctx, cp, broker, adapter, resolver, cfg.PollInterval)
+	} else {
+		poller.Run(ctx, cp, broker, adapter, nil, cfg.PollInterval)
+	}
 	slog.Info("worker stopped")
 	return nil
 }

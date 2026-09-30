@@ -116,6 +116,9 @@ func (s *Server) Routes() http.Handler {
 		handleGetNextWorkerVerification(s.environments, s.verifications)))
 	mux.Handle("POST /v1/worker/verifications/{id}/result", requireWorkerAuth(s.workers,
 		handlePostWorkerVerificationResult(s.verifications)))
+	mux.Handle("PUT /v1/worker/ci-callback-url", requireWorkerAuth(s.workers,
+		handlePutWorkerCICallbackURL(s.workers)))
+	mux.Handle("GET /v1/ci/callback-url", handleGetCICallbackURL(s.workers))
 	mux.Handle("POST /v1/pipelines", requireAuth(s.verifier, s.sessions,
 		handlePostPipelines(s.environments, s.pipelines)))
 	mux.Handle("GET /v1/pipelines/{id}", requireAuth(s.verifier, s.sessions,
@@ -127,6 +130,12 @@ func (s *Server) Routes() http.Handler {
 			handleGetRun(s.runs)))
 		mux.Handle("POST /v1/runs/{id}/decision", requireAuth(s.verifier, s.sessions,
 			handlePostRunDecision(s.runs, s.audits)))
+		mux.Handle("GET /v1/worker/runs/next", requireWorkerAuth(s.workers,
+			handleGetNextWorkerRun(s.runs, s.pipelines)))
+		mux.Handle("POST /v1/worker/runs/{id}/result", requireWorkerAuth(s.workers,
+			handlePostWorkerRunResult(s.runs)))
+		mux.Handle("POST /v1/worker/runs/resolve", requireWorkerAuth(s.workers,
+			handlePostWorkerRunResolve(s.runs, s.pipelines, s.environments, s.audits)))
 	}
 	return mux
 }

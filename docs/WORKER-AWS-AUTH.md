@@ -54,5 +54,5 @@ Onboarding a 1,001st account never touches the worker:
 ## Non-goals
 
 - **GCP/Azure** — deferred; see [Decision 017](DECISIONS.md). Everything above is AWS-specific by design.
-- **CI-OIDC-callback verification** — a different mechanism entirely (a pipeline proving its own identity to the worker), covered by [SECURITY-MODEL.md](SECURITY-MODEL.md)'s "The CI boundary" section and unbuilt Phase 1 work (`internal/ciauth`). Not duplicated here.
+- **CI-OIDC-callback verification** — a different mechanism entirely (a pipeline proving its own identity to the worker), covered by [SECURITY-MODEL.md](SECURITY-MODEL.md)'s "The CI boundary" section and `worker/internal/ciauth` (see [ARCHITECTURE.md](ARCHITECTURE.md) "CI OIDC callback" and [CI-INTEGRATION.md](CI-INTEGRATION.md)). Not duplicated here.
 - **Break-glass** — already covered in [SECURITY-MODEL.md](SECURITY-MODEL.md); not repeated here.

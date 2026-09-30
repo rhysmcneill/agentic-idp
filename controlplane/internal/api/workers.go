@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -338,4 +339,82 @@ func handlePostWorkerGrantEnvironments(environments *environment.Store, workers 
 
 		w.WriteHeader(http.StatusNoContent)
 	})
+}
+
+type setCICallbackURLRequest struct {
+	URL string `json:"url"`
+}
+
+// handlePutWorkerCICallbackURL lets a worker register its own CI OIDC
+// callback address, announced by the worker itself at startup rather than
+// configured centrally — the control plane only stores what it's told.
+func handlePutWorkerCICallbackURL(workers *workercred.Store) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cred, ok := workerCredentialFromContext(r.Context())
+		if !ok {
+			writeInternalError(w, errors.New("workers: no worker credential in request context — requireWorkerAuth was not applied"))
+			return
+		}
+
+		var req setCICallbackURLRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, codeInvalidRequest, "malformed request body")
+			return
+		}
+		if !isValidCallbackURL(req.URL) {
+			writeError(w, http.StatusBadRequest, codeInvalidRequest, "url must be an absolute http(s) URL")
+			return
+		}
+
+		if err := workers.SetCICallbackURL(r.Context(), cred.ID, req.URL); err != nil {
+			writeInternalError(w, err)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+	})
+}
+
+type getCICallbackURLResponse struct {
+	URL string `json:"url"`
+}
+
+// handleGetCICallbackURL is an unauthenticated discovery endpoint: it lets
+// idpctl ci auth find where to send a CI job's OIDC token without every job
+// needing its own copy of the URL. Safe unauthenticated — the value isn't
+// sensitive, and the OIDC signature check is the actual security boundary,
+// not secrecy of this address. Scoped by provider+repo (required query
+// params) so a worker credential for one environment can't answer discovery
+// for a repo/environment it has no relationship to.
+func handleGetCICallbackURL(workers *workercred.Store) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		provider := r.URL.Query().Get("provider")
+		repo := r.URL.Query().Get("repo")
+		if provider == "" || repo == "" {
+			writeError(w, http.StatusBadRequest, codeInvalidRequest, "provider and repo query parameters are required")
+			return
+		}
+
+		url, err := workers.CICallbackURLForRepo(r.Context(), provider, repo)
+		if errors.Is(err, workercred.ErrNoCallbackURL) {
+			writeError(w, http.StatusNotFound, codeNotFound, "no worker has registered a ci callback url for this repo")
+			return
+		}
+		if err != nil {
+			writeInternalError(w, err)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, getCICallbackURLResponse{URL: url})
+	})
+}
+
+// isValidCallbackURL requires an absolute http(s) URL — rejects empty
+// values and anything that isn't a real URL a CI job could actually POST to.
+func isValidCallbackURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	return u.Scheme == "http" || u.Scheme == "https"
 }

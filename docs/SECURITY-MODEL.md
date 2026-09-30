@@ -9,8 +9,8 @@ The security model *is* the product. A customer's security review will ask for t
 | Agent → control plane | Agent token | Token is verifiable; **its claims are trusted, the request body is not** |
 | Control plane → worker | Job instructions | Worker authenticates with its own hashed bearer credential, scoped to environments — not an actor token; connection is outbound-only from the worker |
 | Worker → AWS | `sts:AssumeRole` | Role and external ID were registered by an authorised human |
-| Worker → CI | Trigger + correlation ID | CI is customer-operated and semi-trusted |
-| CI → control plane | CI OIDC token | Token is verified against the provider's JWKS; **claims decide, not assertions** |
+| Worker → CI | Trigger (dispatch) | CI is customer-operated and semi-trusted |
+| CI → worker → control plane | CI OIDC token | Worker verifies against the provider's own OIDC discovery; **verified claims decide, not a client-asserted correlation value** |
 
 The recurring rule: **anything crossing a boundary where the other side could forge it must never feed authorisation.**
 
@@ -82,10 +82,12 @@ This keeps the two auth mechanisms honest rather than overloading one to mean di
 
 **The fix:** the pipeline must not use its own static role. It calls back presenting its **CI OIDC token** (GitHub and GitLab both issue these with repo, workflow and ref claims). The callback is handled by the **worker**, not the control plane — brokering credentials means calling STS, and only the worker may do that. The worker:
 
-1. Verifies the token against the provider's JWKS
-2. Asks the control plane, over its existing outbound connection, whether the correlation maps to an approved run and at what tier
-3. Confirms the run is still in an executing state
+1. Verifies the token's signature, issuer, audience and expiry against the provider's own OIDC discovery (`worker/internal/ciauth`)
+2. Matches the token's *verified* claims (repo, workflow, ref) to the single outstanding run for that pipeline — never a client-asserted correlation value, since anything the pipeline itself could supply in a request is exactly what this fix exists to stop trusting
+3. Confirms the run is still in an executing state, and re-checks policy at this exact moment (a pipeline's `mutating` flag can change in the gap between dispatch and the job actually starting)
 4. Mints credentials scoped to the **triggering actor's tier**, not the pipeline's own role
+
+Full mechanism: [ARCHITECTURE.md](ARCHITECTURE.md)'s "CI OIDC callback", operational reference in [CI-INTEGRATION.md](CI-INTEGRATION.md).
 
 This inbound path's boundary depends on the customer's CI placement — see [Decision 021](DECISIONS.md), and both cases are equally first-class, not one a variant of the other:
 
@@ -94,7 +96,7 @@ This inbound path's boundary depends on the customer's CI placement — see [Dec
 
 Either way, the link that crosses a trust boundary — worker to control plane — remains outbound-only, and the control plane stays credential-free. That property matters most for a future hosted offering, where the control plane would sit outside the customer's boundary entirely.
 
-**It must fail closed.** A pipeline whose run was denied, or which presents a correlation ID that does not match an approved run, receives nothing — it must not fall back to its own role. This is an explicit Phase 1 verification step.
+**It must fail closed.** A pipeline whose run was denied, or whose verified claims match no approved run, receives nothing — it must not fall back to its own role. This is an explicit Phase 1 verification step.
 
 **The tradeoff, stated plainly:** this requires the customer to modify workflows to fetch credentials from us rather than assuming their own role. That is the difference between "drop-in" and "rewire your CI", and it is the single biggest adoption risk in the v1 strategy. It is the first thing to put in front of a design partner.
 

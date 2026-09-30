@@ -195,7 +195,7 @@ This is deliberately **not** the Phase 1 run state machine ([ARCHITECTURE.md](AR
 | `environment_id` | `uuid` NOT NULL REFERENCES `environments` | which environment this pipeline config applies to |
 | `provider` | `text` NOT NULL | mirrors `pkg/ci.Provider` (`github_actions`, `gitlab_ci`, `jenkins`, `atlantis`, `bitbucket_pipelines`) |
 | `workflow_ref` | `text` NOT NULL | e.g. a GitHub Actions workflow file path |
-| `settings` | `jsonb` NOT NULL DEFAULT `'{}'` | mirrors `pkg/ci.Config.Settings` — provider-specific, deliberately loose since each adapter defines its own required keys via `Config.Require` |
+| `settings` | `jsonb` NOT NULL DEFAULT `'{}'` | mirrors `pkg/ci.Config.Settings` — provider-specific, deliberately loose since each adapter defines its own required keys via `Config.Require`. For `github_actions`: `repo` (required, `owner/name`, also the key the CI OIDC callback's discovery and correlation matching join against) and `ref` (optional, defaults to `main` if unset) |
 | `mutating` | `boolean` NOT NULL DEFAULT `true` | whether this pipeline can change the environment. Drives the `ReadOnly` tier's policy check ([SECURITY-MODEL.md](SECURITY-MODEL.md)): `ReadOnly` may trigger a non-mutating pipeline (e.g. `terraform plan`) unattended, never a mutating one |
 | `created_at` | `timestamptz` NOT NULL DEFAULT `now()` | |
 
@@ -218,7 +218,7 @@ This is deliberately **not** the Phase 1 run state machine ([ARCHITECTURE.md](AR
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | `uuid` PK | this **is** the correlation ID injected into the external run (`pkg/ci.Handle.Correlation`) |
+| `id` | `uuid` PK | this **is** `pkg/ci.Handle.Correlation` — injected into the external run for a provider without `OIDCCallback`; for GitHub Actions specifically, never injected, since the CI OIDC callback resolves the run from its own verified claims instead (see [ARCHITECTURE.md](ARCHITECTURE.md) "CI OIDC callback") |
 | `tenant_id` | `uuid` NOT NULL REFERENCES `tenants` | |
 | `actor_id` | `uuid` NOT NULL REFERENCES `actors` | who requested it |
 | `environment_id` | `uuid` NOT NULL REFERENCES `environments` | the environment this run executes against — required even before `bindings` exists (Phase 1 has runs but not yet a catalog) |
@@ -236,6 +236,8 @@ This is deliberately **not** the Phase 1 run state machine ([ARCHITECTURE.md](AR
 | `started_at` | `timestamptz` NULL | |
 | `finished_at` | `timestamptz` NULL | |
 | `created_at` | `timestamptz` NOT NULL DEFAULT `now()` | |
+| `claimed_by` | `uuid` NULL REFERENCES `worker_credentials` | which worker claimed the job for dispatch — mirrors `environment_verifications.claimed_by`; the run row already is the job record, so no separate claim table is needed the way Phase 0's verification queue needed one |
+| `claimed_at` | `timestamptz` NULL | |
 
 `UNIQUE (tenant_id, actor_id, idempotency_key) WHERE idempotency_key IS NOT NULL`.
 
@@ -346,6 +348,7 @@ The worker is not an `actors` row at all — see [Decision 019](DECISIONS.md): i
 | `token_hash` | `text` NOT NULL | SHA-256 of the token, not bcrypt: a bearer token carries no separate identifier to look up a row by first (unlike `local_users`, where the *username* finds the row and bcrypt only then compares the password) — bcrypt's per-row salt makes a token-only lookup impossible without scanning every row. The token's own high entropy, not a salt, is what makes an unsalted deterministic hash safe here — the same approach GitHub PATs and Kubernetes bootstrap tokens use. Checked by its own `requireWorkerAuth` middleware, never `identity.Verifier` |
 | `created_at` | `timestamptz` NOT NULL DEFAULT `now()` | |
 | `revoked_at` | `timestamptz` NULL | whole-credential revocation; no per-session `jti` concept — a worker isn't minting individually-revocable sessions the way an actor's token is |
+| `ci_callback_url` | `text` NULL | this worker's own CI OIDC callback address, self-registered at startup (`PUT /v1/worker/ci-callback-url`) from its own `IDP_CI_CALLBACK_URL` config — the control plane never decides this, only stores what the worker announces. Read by `GET /v1/ci/callback-url`, scoped by `provider`+`repo` through a join against `pipelines`/`worker_credential_environments` (a worker can only answer discovery for a repo it's actually granted an environment for — see [ARCHITECTURE.md](ARCHITECTURE.md) "CI OIDC callback") |
 
 `UNIQUE (tenant_id, name)`. `idpctl worker enrol` is the only thing that ever inserts a row here; the plaintext token is shown once and never stored.
 

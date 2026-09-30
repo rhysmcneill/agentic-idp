@@ -131,6 +131,195 @@ func (c *Client) NextJob(ctx context.Context) (*Job, error) {
 	}, nil
 }
 
+// Run is a claimed run: everything the worker needs to dispatch its
+// pipeline.
+type Run struct {
+	RunID       string
+	Provider    string
+	WorkflowRef string
+	Settings    map[string]string
+}
+
+// NextRun claims the oldest un-claimed executing run scoped to this worker
+// credential's granted environments, or returns a nil Run if none is
+// executing.
+func (c *Client) NextRun(ctx context.Context) (*Run, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/worker/runs/next", nil)
+	if err != nil {
+		return nil, fmt.Errorf("controlplane: building next-run request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("controlplane: fetching next run: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNoContent {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("controlplane: fetching next run: unexpected status %d", resp.StatusCode)
+	}
+
+	var wire struct {
+		RunID       string            `json:"run_id"`
+		Provider    string            `json:"provider"`
+		WorkflowRef string            `json:"workflow_ref"`
+		Settings    map[string]string `json:"settings"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&wire); err != nil {
+		return nil, fmt.Errorf("controlplane: decoding next run: %w", err)
+	}
+
+	return &Run{
+		RunID:       wire.RunID,
+		Provider:    wire.Provider,
+		WorkflowRef: wire.WorkflowRef,
+		Settings:    wire.Settings,
+	}, nil
+}
+
+// RunResult is the terminal outcome of a claimed run.
+type RunResult struct {
+	Status        string
+	CIExternalRef string
+	CIURL         string
+	CIRawStatus   string
+}
+
+// ReportRunResult posts the outcome of a claimed run back to the control
+// plane.
+func (c *Client) ReportRunResult(ctx context.Context, runID string, result RunResult) error {
+	body, err := json.Marshal(struct {
+		Status        string `json:"status"`
+		CIExternalRef string `json:"ci_external_ref"`
+		CIURL         string `json:"ci_url"`
+		CIRawStatus   string `json:"ci_raw_status"`
+	}{
+		Status:        result.Status,
+		CIExternalRef: result.CIExternalRef,
+		CIURL:         result.CIURL,
+		CIRawStatus:   result.CIRawStatus,
+	})
+	if err != nil {
+		return fmt.Errorf("controlplane: marshalling run result: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/worker/runs/"+runID+"/result", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("controlplane: building report-run-result request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.token)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("controlplane: reporting run result: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("controlplane: reporting run result: unexpected status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// ResolvedRun is what the control plane returns once a CI job's claims are
+// matched to a run: everything needed to mint tier-scoped AWS credentials.
+type ResolvedRun struct {
+	RunID       string
+	Tier        int16
+	AccountRef  string
+	ExternalID  string
+	TrustAnchor string
+	RoleARN     string
+}
+
+// ResolveRun matches provider/repo/workflowRef/ref to the run they
+// authorise, records ciExternalRef/ciURL against it, and returns what's
+// needed to mint credentials.
+func (c *Client) ResolveRun(ctx context.Context, provider, repo, workflowRef, ref, ciExternalRef, ciURL string) (ResolvedRun, error) {
+	body, err := json.Marshal(struct {
+		Provider      string `json:"provider"`
+		Repo          string `json:"repo"`
+		WorkflowRef   string `json:"workflow_ref"`
+		Ref           string `json:"ref"`
+		CIExternalRef string `json:"ci_external_ref"`
+		CIURL         string `json:"ci_url"`
+	}{
+		Provider: provider, Repo: repo, WorkflowRef: workflowRef, Ref: ref,
+		CIExternalRef: ciExternalRef, CIURL: ciURL,
+	})
+	if err != nil {
+		return ResolvedRun{}, fmt.Errorf("controlplane: marshalling resolve request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/worker/runs/resolve", bytes.NewReader(body))
+	if err != nil {
+		return ResolvedRun{}, fmt.Errorf("controlplane: building resolve request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.token)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return ResolvedRun{}, fmt.Errorf("controlplane: resolving run: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return ResolvedRun{}, fmt.Errorf("controlplane: resolving run: unexpected status %d", resp.StatusCode)
+	}
+
+	var wire struct {
+		RunID       string `json:"run_id"`
+		Tier        int16  `json:"tier"`
+		AccountRef  string `json:"account_ref"`
+		ExternalID  string `json:"external_id"`
+		TrustAnchor string `json:"trust_anchor"`
+		RoleARN     string `json:"role_arn"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&wire); err != nil {
+		return ResolvedRun{}, fmt.Errorf("controlplane: decoding resolve response: %w", err)
+	}
+
+	return ResolvedRun{
+		RunID: wire.RunID, Tier: wire.Tier, AccountRef: wire.AccountRef,
+		ExternalID: wire.ExternalID, TrustAnchor: wire.TrustAnchor, RoleARN: wire.RoleARN,
+	}, nil
+}
+
+// RegisterCICallback tells the control plane this worker's own CI OIDC
+// callback is reachable at url, so idpctl ci auth can discover it.
+func (c *Client) RegisterCICallback(ctx context.Context, url string) error {
+	body, err := json.Marshal(struct {
+		URL string `json:"url"`
+	}{URL: url})
+	if err != nil {
+		return fmt.Errorf("controlplane: marshalling callback registration: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+"/v1/worker/ci-callback-url", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("controlplane: building callback registration request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.token)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("controlplane: registering ci callback: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("controlplane: registering ci callback: unexpected status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // ReportResult posts the outcome of a claimed verification back to the
 // control plane.
 func (c *Client) ReportResult(ctx context.Context, verificationID string, results map[string]TierResult) error {

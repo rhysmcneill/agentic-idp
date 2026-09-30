@@ -405,3 +405,102 @@ func TestPostWorkers_RootActorGrantsAnyEnvironment(t *testing.T) {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusCreated)
 	}
 }
+
+const discoveryQuery = "?provider=github_actions&repo=acme%2Fwidgets"
+
+func TestCICallbackURL_RegisterAndDiscover(t *testing.T) {
+	ts := newTestServer(t)
+	_, _, adminToken := setupAndLogin(t, ts)
+	envResp := doAuthedJSON(t, http.MethodPost, ts.URL+"/v1/environments", adminToken, validEnvironmentBody())
+	if envResp.StatusCode != http.StatusCreated {
+		t.Fatalf("registering prerequisite environment: status = %d", envResp.StatusCode)
+	}
+	env := decodeJSON[struct {
+		EnvironmentID string `json:"environment_id"`
+	}](t, envResp)
+	workerToken := enrolWorker(t, ts, adminToken, "staging", "worker-staging")
+
+	pipeResp := doAuthedJSON(t, http.MethodPost, ts.URL+"/v1/pipelines", adminToken, map[string]any{
+		"environment_id": env.EnvironmentID,
+		"provider":       "github_actions",
+		"workflow_ref":   ".github/workflows/deploy.yml",
+		"settings":       map[string]string{"repo": "acme/widgets"},
+		"mutating":       true,
+	})
+	if pipeResp.StatusCode != http.StatusCreated {
+		t.Fatalf("registering prerequisite pipeline: status = %d", pipeResp.StatusCode)
+	}
+
+	// Nothing registered yet.
+	resp := doJSON(t, http.MethodGet, ts.URL+"/v1/ci/callback-url"+discoveryQuery, nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("GET before registration: status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+
+	// The worker registers its own callback URL.
+	resp = doAuthedJSON(t, http.MethodPut, ts.URL+"/v1/worker/ci-callback-url", workerToken, map[string]any{
+		"url": "https://idp-worker.example.com/ci/callback",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT ci-callback-url: status = %d", resp.StatusCode)
+	}
+
+	// idpctl ci auth discovers it — unauthenticated, no token at all.
+	resp = doJSON(t, http.MethodGet, ts.URL+"/v1/ci/callback-url"+discoveryQuery, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET after registration: status = %d", resp.StatusCode)
+	}
+	got := decodeJSON[struct {
+		URL string `json:"url"`
+	}](t, resp)
+	if got.URL != "https://idp-worker.example.com/ci/callback" {
+		t.Errorf("URL = %q, want the registered value", got.URL)
+	}
+}
+
+func TestGetCICallbackURL_RequiresProviderAndRepo(t *testing.T) {
+	ts := newTestServer(t)
+
+	resp := doJSON(t, http.MethodGet, ts.URL+"/v1/ci/callback-url", nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestPutCICallbackURL_RequiresWorkerAuth(t *testing.T) {
+	ts := newTestServer(t)
+	_, _, adminToken := setupAndLogin(t, ts)
+
+	resp := doAuthedJSON(t, http.MethodPut, ts.URL+"/v1/worker/ci-callback-url", adminToken, map[string]any{
+		"url": "https://idp-worker.example.com/ci/callback",
+	})
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
+	}
+}
+
+func TestPutCICallbackURL_RejectsEmpty(t *testing.T) {
+	ts := newTestServer(t)
+	_, _, adminToken := setupAndLogin(t, ts)
+	registerEnvironment(t, ts, adminToken)
+	workerToken := enrolWorker(t, ts, adminToken, "staging", "worker-staging")
+
+	resp := doAuthedJSON(t, http.MethodPut, ts.URL+"/v1/worker/ci-callback-url", workerToken, map[string]any{"url": ""})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestPutCICallbackURL_RejectsMalformedURL(t *testing.T) {
+	ts := newTestServer(t)
+	_, _, adminToken := setupAndLogin(t, ts)
+	registerEnvironment(t, ts, adminToken)
+	workerToken := enrolWorker(t, ts, adminToken, "staging", "worker-staging")
+
+	for _, bad := range []string{"not-a-url", "javascript:alert(1)", "ftp://example.com", "/relative/path"} {
+		resp := doAuthedJSON(t, http.MethodPut, ts.URL+"/v1/worker/ci-callback-url", workerToken, map[string]any{"url": bad})
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("url=%q: status = %d, want %d", bad, resp.StatusCode, http.StatusBadRequest)
+		}
+	}
+}

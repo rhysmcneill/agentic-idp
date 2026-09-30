@@ -9,8 +9,10 @@ import (
 
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/dbtest"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/environment"
+	"github.com/rhysmcneill/agentic-idp/controlplane/internal/pipeline"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/tenant"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/workercred"
+	"github.com/rhysmcneill/agentic-idp/pkg/ci"
 	"github.com/rhysmcneill/agentic-idp/pkg/cloud"
 )
 
@@ -239,5 +241,105 @@ func TestCredential_PermitsEnvironment_FalseForUngranted(t *testing.T) {
 
 	if created.PermitsEnvironment(ungranted.ID) {
 		t.Error("PermitsEnvironment returned true for an environment not granted")
+	}
+}
+
+func TestSetCICallbackURL_ThenForRepo(t *testing.T) {
+	conn := dbtest.New(t)
+	ctx := context.Background()
+
+	tn, err := tenant.NewStore(conn).Create(ctx, "acme-corp")
+	if err != nil {
+		t.Fatalf("creating prerequisite tenant: %v", err)
+	}
+	env, err := environment.NewStore(conn).Create(ctx, tn.ID, "staging", cloud.ProviderAWS, "us-east-1")
+	if err != nil {
+		t.Fatalf("creating prerequisite environment: %v", err)
+	}
+	if _, err := pipeline.NewStore(conn).Create(ctx, tn.ID, env.ID, ci.ProviderGitHubActions,
+		".github/workflows/deploy.yml", map[string]string{"repo": "acme/widgets"}, true); err != nil {
+		t.Fatalf("creating prerequisite pipeline: %v", err)
+	}
+
+	store := workercred.NewStore(conn)
+	cred, _, err := store.Create(ctx, tn.ID, "worker-staging", []uuid.UUID{env.ID})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := store.SetCICallbackURL(ctx, cred.ID, "https://idp-worker.example.com/ci/callback"); err != nil {
+		t.Fatalf("SetCICallbackURL: %v", err)
+	}
+
+	url, err := store.CICallbackURLForRepo(ctx, string(ci.ProviderGitHubActions), "acme/widgets")
+	if err != nil {
+		t.Fatalf("CICallbackURLForRepo: %v", err)
+	}
+	if url != "https://idp-worker.example.com/ci/callback" {
+		t.Errorf("CICallbackURLForRepo = %q, want the registered value", url)
+	}
+}
+
+func TestCICallbackURLForRepo_NoneRegistered(t *testing.T) {
+	conn := dbtest.New(t)
+	ctx := context.Background()
+
+	if _, err := tenant.NewStore(conn).Create(ctx, "acme-corp"); err != nil {
+		t.Fatalf("creating prerequisite tenant: %v", err)
+	}
+
+	_, err := workercred.NewStore(conn).CICallbackURLForRepo(ctx, string(ci.ProviderGitHubActions), "acme/widgets")
+	if !errors.Is(err, workercred.ErrNoCallbackURL) {
+		t.Errorf("err = %v, want ErrNoCallbackURL", err)
+	}
+}
+
+func TestCICallbackURLForRepo_UnrelatedWorkerCannotHijack(t *testing.T) {
+	conn := dbtest.New(t)
+	ctx := context.Background()
+
+	tn, err := tenant.NewStore(conn).Create(ctx, "acme-corp")
+	if err != nil {
+		t.Fatalf("creating prerequisite tenant: %v", err)
+	}
+	prod, err := environment.NewStore(conn).Create(ctx, tn.ID, "prod", cloud.ProviderAWS, "us-east-1")
+	if err != nil {
+		t.Fatalf("creating prod environment: %v", err)
+	}
+	staging, err := environment.NewStore(conn).Create(ctx, tn.ID, "staging", cloud.ProviderAWS, "us-east-1")
+	if err != nil {
+		t.Fatalf("creating staging environment: %v", err)
+	}
+	if _, err := pipeline.NewStore(conn).Create(ctx, tn.ID, prod.ID, ci.ProviderGitHubActions,
+		".github/workflows/deploy.yml", map[string]string{"repo": "acme/widgets"}, true); err != nil {
+		t.Fatalf("creating prod pipeline: %v", err)
+	}
+	store := workercred.NewStore(conn)
+
+	// The legitimate prod worker registers first.
+	prodWorker, _, err := store.Create(ctx, tn.ID, "worker-prod", []uuid.UUID{prod.ID})
+	if err != nil {
+		t.Fatalf("creating prod worker: %v", err)
+	}
+	if err := store.SetCICallbackURL(ctx, prodWorker.ID, "https://prod-worker.example.com"); err != nil {
+		t.Fatalf("SetCICallbackURL(prod): %v", err)
+	}
+
+	// A worker granted only staging — with no relationship to acme/widgets —
+	// registers a later URL, attempting to hijack discovery for it.
+	stagingWorker, _, err := store.Create(ctx, tn.ID, "worker-staging", []uuid.UUID{staging.ID})
+	if err != nil {
+		t.Fatalf("creating staging worker: %v", err)
+	}
+	if err := store.SetCICallbackURL(ctx, stagingWorker.ID, "https://attacker.example.com"); err != nil {
+		t.Fatalf("SetCICallbackURL(staging): %v", err)
+	}
+
+	url, err := store.CICallbackURLForRepo(ctx, string(ci.ProviderGitHubActions), "acme/widgets")
+	if err != nil {
+		t.Fatalf("CICallbackURLForRepo: %v", err)
+	}
+	if url != "https://prod-worker.example.com" {
+		t.Errorf("CICallbackURLForRepo = %q, want the legitimate prod worker's URL, not the unrelated staging worker's", url)
 	}
 }

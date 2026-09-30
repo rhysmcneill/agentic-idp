@@ -264,6 +264,25 @@ func TestPostRuns_TierPolicyGating(t *testing.T) {
 		}
 	})
 
+	t.Run("worker run resolve requires worker auth", func(t *testing.T) {
+		resp := doAuthedJSON(t, http.MethodPost, ts.URL+"/v1/worker/runs/resolve", adminToken, map[string]any{
+			"provider": "github_actions", "repo": "acme/widgets", "workflow_ref": ".github/workflows/deploy.yml", "ref": "refs/heads/main",
+		})
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("worker run resolve with no matching run is not found", func(t *testing.T) {
+		workerToken := enrolWorker(t, ts, adminToken, "staging", "worker-resolve-test")
+		resp := doAuthedJSON(t, http.MethodPost, ts.URL+"/v1/worker/runs/resolve", workerToken, map[string]any{
+			"provider": "github_actions", "repo": "no-such/repo", "workflow_ref": ".github/workflows/deploy.yml", "ref": "refs/heads/main",
+		})
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+		}
+	})
+
 	t.Run("pipeline creation rejects an environment from another tenant", func(t *testing.T) {
 		otherTenant, err := tenant.NewStore(conn).Create(context.Background(), "other-corp")
 		if err != nil {

@@ -17,6 +17,8 @@ import (
 
 const defaultPollInterval = 5 * time.Second
 
+const defaultCIListenAddr = ":8443"
+
 // Config is the worker's runtime configuration. Exactly one of Token or
 // (BootstrapToken, WorkerName) is set — see Load.
 type Config struct {
@@ -25,6 +27,10 @@ type Config struct {
 	BootstrapToken  string
 	WorkerName      string
 	PollInterval    time.Duration
+	GitHubAppID     string
+	GitHubAppKey    string
+	CIListenAddr    string
+	CICallbackURL   string
 }
 
 // Bootstrap reports whether cfg should self-register (Decision 022) rather
@@ -38,6 +44,14 @@ func (cfg Config) Bootstrap() bool { return cfg.BootstrapToken != "" }
 //     IDP_WORKER_BOOTSTRAP_TOKEN/_FILE plus IDP_WORKER_NAME (self-registers
 //     against the control plane's shared bootstrap secret instead)
 //   - IDP_POLL_INTERVAL (optional, defaults to 5s)
+//   - IDP_GITHUB_APP_ID and IDP_GITHUB_APP_PRIVATE_KEY/_FILE (optional — only
+//     needed to dispatch GitHub Actions pipelines; a worker with none
+//     registered can leave both unset)
+//   - IDP_CI_CALLBACK_URL (required whenever IDP_GITHUB_APP_ID is set — this
+//     callback's own address, as a CI job would reach it; no default is
+//     possible since a process can't know its own externally-reachable URL)
+//   - IDP_CI_LISTEN_ADDR (optional, defaults to :8443 — the local bind
+//     address, distinct from IDP_CI_CALLBACK_URL)
 func Load(getenv func(string) string) (Config, error) {
 	url, err := requireEnv(getenv, "IDP_CONTROL_PLANE_URL")
 	if err != nil {
@@ -57,12 +71,32 @@ func Load(getenv func(string) string) (Config, error) {
 		}
 	}
 
+	appKey, err := loadOptionalSecret(getenv, "IDP_GITHUB_APP_PRIVATE_KEY", "IDP_GITHUB_APP_PRIVATE_KEY_FILE")
+	if err != nil {
+		return Config{}, err
+	}
+
+	githubAppID := getenv("IDP_GITHUB_APP_ID")
+	callbackURL := getenv("IDP_CI_CALLBACK_URL")
+	if githubAppID != "" && callbackURL == "" {
+		return Config{}, errors.New("config: IDP_CI_CALLBACK_URL is required when IDP_GITHUB_APP_ID is set")
+	}
+
+	listenAddr := defaultCIListenAddr
+	if raw := getenv("IDP_CI_LISTEN_ADDR"); raw != "" {
+		listenAddr = raw
+	}
+
 	return Config{
 		ControlPlaneURL: strings.TrimRight(url, "/"),
 		Token:           token,
 		BootstrapToken:  bootstrapToken,
 		WorkerName:      workerName,
 		PollInterval:    interval,
+		GitHubAppID:     githubAppID,
+		GitHubAppKey:    appKey,
+		CIListenAddr:    listenAddr,
+		CICallbackURL:   callbackURL,
 	}, nil
 }
 
@@ -119,4 +153,15 @@ func loadSecret(getenv func(string) string, envName, fileName string) (string, e
 	default:
 		return "", fmt.Errorf("config: one of %s or %s is required", envName, fileName)
 	}
+}
+
+// loadOptionalSecret is loadSecret without the "one of them is required"
+// case — an empty return means the caller simply hasn't configured this
+// credential, which is valid for a worker that never dispatches GitHub
+// Actions pipelines.
+func loadOptionalSecret(getenv func(string) string, envName, fileName string) (string, error) {
+	if getenv(envName) == "" && getenv(fileName) == "" {
+		return "", nil
+	}
+	return loadSecret(getenv, envName, fileName)
 }

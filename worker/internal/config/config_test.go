@@ -139,6 +139,51 @@ func TestLoad_CannotSetBothTokenAndBootstrapToken(t *testing.T) {
 	}
 }
 
+func TestLoad_GitHubAppRequiresCallbackURL(t *testing.T) {
+	_, err := config.Load(fakeEnv(map[string]string{
+		"IDP_CONTROL_PLANE_URL":      "http://localhost:8080",
+		"IDP_WORKER_TOKEN":           "a-worker-token",
+		"IDP_GITHUB_APP_ID":          "12345",
+		"IDP_GITHUB_APP_PRIVATE_KEY": "fake-pem",
+	}))
+	if err == nil {
+		t.Fatal("Load succeeded with IDP_GITHUB_APP_ID set but no IDP_CI_CALLBACK_URL")
+	}
+}
+
+func TestLoad_GitHubAppWithCallbackURL(t *testing.T) {
+	cfg, err := config.Load(fakeEnv(map[string]string{
+		"IDP_CONTROL_PLANE_URL":      "http://localhost:8080",
+		"IDP_WORKER_TOKEN":           "a-worker-token",
+		"IDP_GITHUB_APP_ID":          "12345",
+		"IDP_GITHUB_APP_PRIVATE_KEY": "fake-pem",
+		"IDP_CI_CALLBACK_URL":        "https://idp-worker.example.com/ci/callback",
+	}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.CICallbackURL != "https://idp-worker.example.com/ci/callback" {
+		t.Errorf("CICallbackURL = %q, want the configured value", cfg.CICallbackURL)
+	}
+	if cfg.CIListenAddr != ":8443" {
+		t.Errorf("CIListenAddr = %q, want the default", cfg.CIListenAddr)
+	}
+}
+
+func TestLoad_CustomCIListenAddr(t *testing.T) {
+	cfg, err := config.Load(fakeEnv(map[string]string{
+		"IDP_CONTROL_PLANE_URL": "http://localhost:8080",
+		"IDP_WORKER_TOKEN":      "a-worker-token",
+		"IDP_CI_LISTEN_ADDR":    ":9000",
+	}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.CIListenAddr != ":9000" {
+		t.Errorf("CIListenAddr = %q, want %q", cfg.CIListenAddr, ":9000")
+	}
+}
+
 func TestLoad_CustomPollInterval(t *testing.T) {
 	cfg, err := config.Load(fakeEnv(map[string]string{
 		"IDP_CONTROL_PLANE_URL": "http://localhost:8080",

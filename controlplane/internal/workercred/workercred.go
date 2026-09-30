@@ -201,6 +201,41 @@ func (s *Store) Verify(ctx context.Context, token string) (Credential, error) {
 	return fromRow(row, envIDs), nil
 }
 
+// SetCICallbackURL registers credentialID's own reachable CI OIDC callback
+// address, as the worker itself reports it — the control plane never
+// decides this, only stores what the worker announces.
+func (s *Store) SetCICallbackURL(ctx context.Context, credentialID uuid.UUID, url string) error {
+	if _, err := s.q.SetWorkerCICallbackURL(ctx, sqlcgen.SetWorkerCICallbackURLParams{
+		ID:            credentialID,
+		CiCallbackUrl: sql.NullString{String: url, Valid: url != ""},
+	}); err != nil {
+		return fmt.Errorf("workercred: set ci callback url: %w", err)
+	}
+	return nil
+}
+
+// ErrNoCallbackURL is returned by CICallbackURLForRepo when no worker
+// granted a matching environment has registered a callback URL.
+var ErrNoCallbackURL = errors.New("workercred: no ci callback url registered")
+
+// CICallbackURLForRepo returns the CI OIDC callback URL registered by a
+// worker credential that is actually granted an environment with a
+// registered provider+repo pipeline — scoped this way so one worker's
+// credential can't answer discovery for a repo/environment it has no
+// relationship to. If more than one matching worker has registered a
+// different URL, the most recent wins — a documented simplification, not a
+// silent guess across unrelated environments.
+func (s *Store) CICallbackURLForRepo(ctx context.Context, provider, repo string) (string, error) {
+	url, err := s.q.GetCICallbackURLForRepo(ctx, sqlcgen.GetCICallbackURLForRepoParams{Provider: provider, Repo: repo})
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNoCallbackURL
+	}
+	if err != nil {
+		return "", fmt.Errorf("workercred: ci callback url for repo: %w", err)
+	}
+	return url.String, nil
+}
+
 // PermitsEnvironment reports whether c is scoped to environmentID.
 func (c Credential) PermitsEnvironment(environmentID uuid.UUID) bool {
 	for _, id := range c.Environments {

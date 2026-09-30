@@ -46,7 +46,9 @@ It is a thin, unprivileged translator. It **forwards the agent's token** rather 
 
 **Worker** (`worker/`) — customer-deployed single binary, and the only component that holds cloud credentials. Polls the control plane outbound for approved jobs. Assumes the tier-appropriate IAM role via `internal/broker`, holds temporary credentials in memory only, triggers and tracks CI runs, reports back.
 
-It also **receives OIDC callbacks from the customer's pipelines** (`internal/ciauth`), since brokering credentials requires calling STS and only the worker may do that. The link that crosses a trust boundary — worker to control plane — remains outbound-only regardless of the two cases below.
+It also **receives OIDC callbacks from the customer's pipelines** (`worker/internal/ciauth`), since brokering credentials requires calling STS and only the worker may do that. The link that crosses a trust boundary — worker to control plane — remains outbound-only regardless of the two cases below.
+
+`worker/internal/ciauth` isn't GitHub-specific internally: a `Verifier` per CI provider (`worker/internal/ciauth/githuboidc` for GitHub Actions, using `coreos/go-oidc` for full OIDC verification — signature, issuer, audience, expiry, with JWKS fetch/cache/rotation handled by the library rather than hand-rolled) is registered into a `Registry`, the same shape as `pkg/ci.Registry`. Adding GitLab CI/CD or an HCP Terraform/Atlantis-style adapter later is "write one more `Verifier`," not a redesign — both issue OIDC ID tokens the same way GitHub Actions does. See "CI OIDC callback" below for the full flow.
 
 **One worker identity, many AWS accounts.** The diagram above shows one "Customer AWS account" box for simplicity, but nothing ties a worker process to a single account — see [Decision 020](DECISIONS.md). One worker, running under one stable identity (IRSA role, instance profile, ECS task role), assumes IAM roles across as many accounts as it has been granted `Environment`s for, via ordinary cross-account `sts:AssumeRole` + per-environment external ID. Deploying a second worker is an operational choice (throughput, HA, or CI reachability, next), never a function of account count. See [WORKER-AWS-AUTH.md](WORKER-AWS-AUTH.md) for the IAM mechanics.
 
@@ -54,7 +56,7 @@ It also **receives OIDC callbacks from the customer's pipelines** (`internal/cia
 - **Self-hosted CI** (the diagram's case): the customer's own runner fleet shares a private network with the worker, so the OIDC callback stays internal — this is the "internal boundary" the diagram depicts.
 - **SaaS/cloud-hosted CI** (GitHub-hosted runners, Bitbucket Cloud Pipelines): the CI job runs on the provider's own infrastructure, not the customer's network. There is no private network for the worker to sit inside of, so its callback endpoint is instead externally reachable — a public-facing boundary, terminated over TLS, with the same trust assumption as any other public webhook receiver (Codecov, Snyk), not a weaker one.
 
-A customer may run both placements at once against the same control plane. Neither is a variant of the other; `internal/ciauth` (Phase 1, currently unbuilt) must be designed for both from the start.
+A customer may run both placements at once against the same control plane. Neither is a variant of the other; `worker/internal/ciauth` is designed for both from the start, not self-hosted-first with SaaS bolted on. Reachability is purely a deployment decision (the customer's own ingress/TLS/DNS), not different code paths — the callback's own address becomes the OIDC `aud` value either way (see "CI OIDC callback" below), whether that address is an internal-only DNS name (self-hosted CI, same network as the worker) or a real public HTTPS endpoint (SaaS/GitHub-hosted runners, which run entirely outside the customer's network and so have no private path to the worker at all).
 
 **CLI** (`cli/`) — `idpctl`. Used by humans and scriptable by agents that do not speak MCP.
 
@@ -106,7 +108,7 @@ Durable run records, incremental log capture, cancellation, timeouts, idempotenc
 
 Approvals attach to a run. **The approver must see the change diff** — which promotes log capture from a nice-to-have to load-bearing infrastructure.
 
-`idpctl pipeline create/get` and `idpctl run request/get/approve/deny` are today's only clients of `POST/GET /v1/pipelines` and `POST/GET /v1/runs`, `POST /v1/runs/{id}/decision` — the Slack-webhook half of the approval workflow ([V1-ROADMAP.md](V1-ROADMAP.md) Phase 1) becomes a second client of the same decision endpoint, the same pattern `idpctl environment verify` already established above.
+`idpctl pipeline register/get` and `idpctl run request/get/approve/deny` are today's only clients of `POST/GET /v1/pipelines` and `POST/GET /v1/runs`, `POST /v1/runs/{id}/decision` — the Slack-webhook half of the approval workflow ([V1-ROADMAP.md](V1-ROADMAP.md) Phase 2, deferred until OIDC gives human actors a verified identity to link a Slack account against) becomes a second client of the same decision endpoint, the same pattern `idpctl environment verify` already established above.
 
 ## CI integration
 
@@ -117,7 +119,7 @@ Per-provider adapters, because the mechanisms differ fundamentally:
 
 | System | Trigger | Returns |
 |---|---|---|
-| GitHub Actions | `workflow_dispatch` | `204 No Content` — **no run ID**; must be discovered by correlation |
+| GitHub Actions | `workflow_dispatch` | `204 No Content` — **no run ID**; discovered via the CI OIDC callback's verified claims, not by listing/guessing (see "CI OIDC callback" below) |
 | Jenkins | `buildWithParameters` | A queue item to resolve into a build number |
 | GitLab CI | Trigger token / API | Pipeline object with ID immediately |
 | Buildkite, Spacelift, env0, Bitbucket Pipelines | REST | Run/build with ID immediately |
@@ -126,7 +128,7 @@ Per-provider adapters, because the mechanisms differ fundamentally:
 The worker triggers, not the control plane, because it can reach self-hosted CI. It therefore holds CI credentials alongside cloud credentials, consistently.
 
 ### Observe
-**Polling by default.** Webhooks require an inbound endpoint, which conflicts with the outbound-only worker and is frequently unreachable in self-hosted installs. Treat webhooks as an optimisation where the control plane happens to be addressable.
+**Polling by default.** Webhooks require an inbound endpoint, which conflicts with the outbound-only worker and is frequently unreachable in self-hosted installs. Treat webhooks as an optimisation where the control plane happens to be addressable. (The CI OIDC callback is not an exception to this — it's an inbound *credential request*, not a status webhook; the worker still polls the external run's `Status` itself once it has a real external ID, per "CI OIDC callback" below.)
 
 ### Gate
 Gating *before* trigger is trivial but bypassable by anyone pushing directly. Gating *inside* the pipeline via a required status check is unbypassable but requires a workflow change. Lean on GitHub's native required status checks and environment protection rules rather than reinventing them.
@@ -147,11 +149,15 @@ type Adapter interface {
 
 	ValidateConfig(ctx context.Context, cfg Config) error
 
-	// Trigger MUST inject req.Correlation into the external run.
+	// A provider without OIDCCallback must inject req.Correlation into the
+	// external run so Resolve can find it; an OIDCCallback provider's own
+	// callback resolves the run from its verified claims instead (see "CI
+	// OIDC callback" below) — GitHub Actions needs no injected input at all.
 	Trigger(ctx context.Context, cfg Config, req TriggerRequest) (Handle, error)
 
-	// Resolve discovers the external run by Correlation for providers whose
-	// Trigger returns no ID. Returns h unchanged when TriggerReturnsID is true.
+	// Discovers the external run by Correlation for a provider without
+	// OIDCCallback. Returns h unchanged when TriggerReturnsID is true, or
+	// when OIDCCallback is true and the callback already resolved it.
 	Resolve(ctx context.Context, cfg Config, h Handle) (Handle, error)
 
 	Status(ctx context.Context, cfg Config, h Handle) (RunStatus, error)
@@ -163,11 +169,79 @@ type Adapter interface {
 Non-obvious decisions baked into this:
 
 - **`Config` passed per call, not held on the adapter.** Adapters are stateless singletons; config is per-Environment. A worker may serve several environments.
-- **`Correlation` is mandatory for every adapter.** It is our run ID, injected into the external run. Dual purpose: it discovers runs for providers that return no ID, *and* it matches the pipeline's OIDC callback to the run record. Making it universal keeps the credential-brokering path identical across providers.
+- **`Correlation` carries our run ID either way, but only providers without `OIDCCallback` need to inject it.** GitHub Actions' own OIDC token already carries repo/workflow/ref/run ID as verified claims — matching those against the single outstanding run for a pipeline is a stronger signal than a self-reported, injectable value, so the callback resolves the run itself rather than trusting an injected input. A provider without OIDC federation has no such verified signal, so injecting `Correlation` into the external run remains the only way `Resolve` can find it.
 - **`ActorRef` is audit-only, never authorisation.** Same discipline as delegation claims: anything crossing a boundary where the other side could forge it must not feed authorisation.
 - **Normalised `Status` plus provider-native `Raw`.** GitHub splits `status` and `conclusion`; Jenkins has `UNSTABLE` which maps to nothing clean. Keep the native value for audit rather than losing information.
 - **Log offset is an opaque `string`, not an int.** GitHub uses per-job cursors and serves completed logs as a zip; Jenkins uses byte offsets; GitLab uses ranges. An int would leak one provider's model into the interface.
 - **`Capabilities` rather than `ErrUnsupported` everywhere.** Atlantis has no trigger API and no cancel. The run engine needs to know before it schedules a poll loop or renders a UI affordance.
+
+## CI OIDC callback
+
+How a dispatched GitHub Actions job actually gets tier-scoped credentials — the mechanism Decision 004 names, spelled out end to end. Two separate pieces of state travel in opposite directions: the worker triggers the run outbound (§ Trigger), and the run calls back inbound for credentials once it starts. See [CI-INTEGRATION.md](CI-INTEGRATION.md) for the operational/reference side — the callback's wire contract, `idpctl ci auth`, and a worked example.
+
+```
+Worker (poller)                                    Control plane
+        │  1  claims run, calls
+        │     githubactions.Adapter.Trigger
+        ▼
+GitHub Actions dispatches the job — 204, no run ID yet
+        │
+        │  job starts, requests its own OIDC token
+        │  (needs `permissions: id-token: write`)
+        ▼
+idpctl ci auth
+        │  2  GET /v1/ci/callback-url?provider=github_actions&repo=acme/widgets
+        │     unauthenticated — scoped to a worker actually granted
+        │     an environment with a matching registered pipeline
+        │─────────────────────────────────────────────────────────►│
+        │◄────────────────────────────────────────────────────────│
+        │     returns the registered callback URL
+        │
+        │  3  requests a GitHub OIDC token, audience = that same
+        │     callback URL (standard OIDC convention — same shape
+        │     as AWS's sts.amazonaws.com, GCP WIF, K8s service
+        │     account tokens; not a fixed string, since a process
+        │     can't introspect its own externally-reachable address)
+        ▼
+POST <callback URL>  { provider, token }
+        │
+        ▼
+Worker — worker/internal/ciauth.Handler
+        │  4  githuboidc.Verifier.Verify: signature, issuer,
+        │     audience, expiry — coreos/go-oidc, JWKS handled
+        │     internally, not hand-rolled
+        │
+        │  5  POST /v1/worker/runs/resolve
+        │     { provider, repo, workflow_ref, ref, ci_external_ref, ci_url }
+        │     (repo/workflow_ref/ref/run_id all come from the
+        │     verified claims, never the request body)
+        │─────────────────────────────────────────────────────────►│
+        │                                              matches the single
+        │                                              outstanding run for
+        │                                              that pipeline, records
+        │                                              ci_external_ref/ci_url,
+        │                                              re-checks policy (the
+        │                                              pipeline's mutating
+        │                                              flag can change in the
+        │                                              gap since dispatch),
+        │                                              audits credential.minted
+        │◄────────────────────────────────────────────────────────│
+        │     tier + role ARN (never a credential itself)
+        │
+        │  6  broker.MintCredentials — same sts:AssumeRole path
+        │     as every other credential mint in this system
+        ▼
+Credentials returned to idpctl ci auth, printed as json/env/credential-process
+        │
+        │  7  (background, after responding) poll adapter.Status
+        │     until terminal, then
+        ▼
+POST /v1/worker/runs/{id}/result
+```
+
+Why discovery is scoped by `provider`+`repo` rather than "whichever worker registered most recently": an unscoped answer would let a worker credential for one environment redirect *every* other environment's CI-credential traffic to itself — a real cross-environment privilege boundary, not a cosmetic ambiguity. Scoping through the same `pipelines` join `ResolveExternalRef` already uses means a worker can only ever answer discovery for repos whose registered pipeline lives in an environment that worker is actually granted.
+
+The policy re-check in step 5 is the same credential-mint gate `Worker.Work` already runs at `queued → executing` — re-run here because a real gap exists between a workflow being dispatched and it actually starting and calling back (GitHub's own runner queue, self-hosted runner availability), during which a pipeline's `mutating` flag could change. A denial at this point fails the run closed (`POST /v1/worker/runs/{id}/result`, `status: failed`) rather than leaving it `executing` forever.
 
 ## Cloud credential abstraction
 

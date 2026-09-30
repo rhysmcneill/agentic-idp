@@ -68,9 +68,9 @@ type Handle struct {
 	URL        string   `json:"url,omitempty"`
 	Resolved   bool     `json:"resolved"`
 
-	// Our run ID, injected into the external run. Discovers runs for providers
-	// returning no ID, and matches a pipeline's OIDC callback to the record
-	// that authorised it.
+	// Our run ID. For a provider without OIDCCallback, this must be injected
+	// into the external run so Resolve can discover it; an OIDCCallback
+	// provider's callback instead matches its own verified claims to the run.
 	Correlation string `json:"correlation"`
 }
 

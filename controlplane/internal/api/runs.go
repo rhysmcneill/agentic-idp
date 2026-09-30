@@ -12,6 +12,7 @@ import (
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/environment"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/execution"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/pipeline"
+	"github.com/rhysmcneill/agentic-idp/controlplane/internal/policy"
 	"github.com/rhysmcneill/agentic-idp/pkg/identity"
 )
 
@@ -253,6 +254,217 @@ func handlePostRunDecision(runs *execution.Store, audits *audit.Store) http.Hand
 		}
 
 		writeJSON(w, http.StatusOK, runToResponse(run))
+	})
+}
+
+type nextRunResponse struct {
+	RunID       string            `json:"run_id"`
+	Provider    string            `json:"provider"`
+	WorkflowRef string            `json:"workflow_ref"`
+	Settings    map[string]string `json:"settings"`
+}
+
+// handleGetNextWorkerRun lets a worker claim the oldest un-claimed executing
+// run scoped to its own granted environments, returning everything it needs
+// to dispatch the pipeline (provider, workflow ref, settings — e.g. the
+// GitHub repo). Responds 204 when nothing is executing. Mirrors
+// handleGetNextWorkerVerification's shape exactly.
+func handleGetNextWorkerRun(runs *execution.Store, pipelines *pipeline.Store) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cred, ok := workerCredentialFromContext(r.Context())
+		if !ok {
+			writeInternalError(w, errors.New("runs: no worker credential in request context — requireWorkerAuth was not applied"))
+			return
+		}
+
+		ctx := r.Context()
+
+		run, err := runs.Claim(ctx, cred.ID, cred.Environments)
+		if errors.Is(err, execution.ErrNotFound) {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if err != nil {
+			writeInternalError(w, err)
+			return
+		}
+
+		p, err := pipelines.Get(ctx, run.TenantID, run.PipelineID)
+		if err != nil {
+			writeInternalError(w, err)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, nextRunResponse{
+			RunID:       run.ID.String(),
+			Provider:    string(p.Provider),
+			WorkflowRef: p.WorkflowRef,
+			Settings:    p.Settings,
+		})
+	})
+}
+
+type reportRunResultRequest struct {
+	Status        string `json:"status"`
+	CIExternalRef string `json:"ci_external_ref"`
+	CIURL         string `json:"ci_url"`
+	CIRawStatus   string `json:"ci_raw_status"`
+}
+
+var validTerminalRunStatuses = map[string]bool{
+	execution.StatusSucceeded: true,
+	execution.StatusFailed:    true,
+	execution.StatusCancelled: true,
+	execution.StatusTimedOut:  true,
+}
+
+// handlePostWorkerRunResult records the terminal outcome of a claimed run.
+// Only the worker credential that claimed it may report a result —
+// runs.ReportResult enforces that at the query level, so a stolen credential
+// for one worker can't forge results for runs another worker claimed.
+func handlePostWorkerRunResult(runs *execution.Store) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cred, ok := workerCredentialFromContext(r.Context())
+		if !ok {
+			writeInternalError(w, errors.New("runs: no worker credential in request context — requireWorkerAuth was not applied"))
+			return
+		}
+
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, codeInvalidRequest, "malformed run id")
+			return
+		}
+
+		var req reportRunResultRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, codeInvalidRequest, "malformed request body")
+			return
+		}
+		if !validTerminalRunStatuses[req.Status] {
+			writeError(w, http.StatusBadRequest, codeInvalidRequest, "status must be one of succeeded, failed, cancelled, timed_out")
+			return
+		}
+
+		run, err := runs.ReportResult(r.Context(), id, cred.ID, execution.RunResult{
+			Status:        req.Status,
+			CIExternalRef: req.CIExternalRef,
+			CIURL:         req.CIURL,
+			CIRawStatus:   req.CIRawStatus,
+		})
+		if errors.Is(err, execution.ErrNotFound) {
+			writeError(w, http.StatusNotFound, codeNotFound, "unknown or unclaimed run")
+			return
+		}
+		if err != nil {
+			writeInternalError(w, err)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, runToResponse(run))
+	})
+}
+
+type resolveRunRequest struct {
+	Provider      string `json:"provider"`
+	Repo          string `json:"repo"`
+	WorkflowRef   string `json:"workflow_ref"`
+	Ref           string `json:"ref"`
+	CIExternalRef string `json:"ci_external_ref"`
+	CIURL         string `json:"ci_url"`
+}
+
+type resolveRunResponse struct {
+	RunID       string `json:"run_id"`
+	Tier        int16  `json:"tier"`
+	AccountRef  string `json:"account_ref"`
+	ExternalID  string `json:"external_id"`
+	TrustAnchor string `json:"trust_anchor"`
+	RoleARN     string `json:"role_arn"`
+}
+
+// handlePostWorkerRunResolve matches a CI job's verified claims to the run
+// they authorise, records its external ref, re-checks policy, and reveals a
+// role ARN only if still allowed — failing the run closed otherwise.
+func handlePostWorkerRunResolve(runs *execution.Store, pipelines *pipeline.Store, environments *environment.Store, audits *audit.Store) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cred, ok := workerCredentialFromContext(r.Context())
+		if !ok {
+			writeInternalError(w, errors.New("runs: no worker credential in request context — requireWorkerAuth was not applied"))
+			return
+		}
+
+		var req resolveRunRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, codeInvalidRequest, "malformed request body")
+			return
+		}
+
+		ctx := r.Context()
+
+		run, err := runs.ResolveExternalRef(ctx, cred.Environments, req.Provider, req.Repo, req.WorkflowRef, req.Ref, req.CIExternalRef, req.CIURL)
+		switch {
+		case errors.Is(err, execution.ErrNotFound):
+			writeError(w, http.StatusNotFound, codeNotFound, "no matching run")
+			return
+		case errors.Is(err, execution.ErrAmbiguousMatch):
+			writeError(w, http.StatusConflict, codeConflict, "more than one run matches")
+			return
+		case err != nil:
+			writeInternalError(w, err)
+			return
+		}
+
+		p, err := pipelines.Get(ctx, run.TenantID, run.PipelineID)
+		if err != nil {
+			writeInternalError(w, err)
+			return
+		}
+
+		if policy.Check(run.Tier, p.Mutating) != policy.Allow {
+			if _, err := runs.ReportResult(ctx, run.ID, cred.ID, execution.RunResult{
+				Status: execution.StatusFailed, CIExternalRef: req.CIExternalRef, CIURL: req.CIURL,
+				CIRawStatus: "denied at credential mint",
+			}); err != nil {
+				writeInternalError(w, err)
+				return
+			}
+			writeError(w, http.StatusForbidden, codePolicyDenied, "the run's tier no longer permits this pipeline")
+			return
+		}
+
+		awsConfig, err := environments.GetAWSConfig(ctx, run.EnvironmentID)
+		if err != nil {
+			writeInternalError(w, err)
+			return
+		}
+		role, err := environments.GetAWSTierRole(ctx, run.EnvironmentID, run.Tier)
+		if err != nil {
+			writeInternalError(w, err)
+			return
+		}
+
+		tier := run.Tier
+		if _, err := audits.Create(ctx, audit.CreateParams{
+			TenantID:      run.TenantID,
+			ActorID:       run.ActorID,
+			Action:        "credential.minted",
+			RunID:         &run.ID,
+			Tier:          &tier,
+			EnvironmentID: &run.EnvironmentID,
+		}); err != nil {
+			writeInternalError(w, err)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, resolveRunResponse{
+			RunID:       run.ID.String(),
+			Tier:        int16(run.Tier), // #nosec G115 -- run.Tier is a DB-constrained CHECK(1-3) value
+			AccountRef:  awsConfig.AccountRef,
+			ExternalID:  awsConfig.ExternalID,
+			TrustAnchor: awsConfig.TrustAnchor,
+			RoleARN:     role.RoleARN,
+		})
 	})
 }
 

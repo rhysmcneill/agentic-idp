@@ -6,12 +6,17 @@ package sqlcgen
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
 )
 
 type Querier interface {
 	CreateWorkerCredential(ctx context.Context, arg CreateWorkerCredentialParams) (WorkerCredential, error)
+	// Scoped to workers actually granted an environment that has a pipeline
+	// registered for repo+provider — a worker credential for one environment
+	// must not be able to answer discovery for a repo it has no relationship to.
+	GetCICallbackURLForRepo(ctx context.Context, arg GetCICallbackURLForRepoParams) (sql.NullString, error)
 	GetWorkerCredential(ctx context.Context, id uuid.UUID) (WorkerCredential, error)
 	GetWorkerCredentialByTenantAndName(ctx context.Context, arg GetWorkerCredentialByTenantAndNameParams) (WorkerCredential, error)
 	GetWorkerCredentialByTokenHash(ctx context.Context, tokenHash string) (WorkerCredential, error)
@@ -19,6 +24,7 @@ type Querier interface {
 	ListWorkerCredentialEnvironments(ctx context.Context, workerCredentialID uuid.UUID) ([]uuid.UUID, error)
 	ListWorkerCredentials(ctx context.Context, tenantID uuid.UUID) ([]WorkerCredential, error)
 	RotateWorkerCredentialToken(ctx context.Context, arg RotateWorkerCredentialTokenParams) (WorkerCredential, error)
+	SetWorkerCICallbackURL(ctx context.Context, arg SetWorkerCICallbackURLParams) (WorkerCredential, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 )
 
 // APIError is returned when the control plane responds with a structured
@@ -46,6 +47,22 @@ func (c *Client) NeedsSetup(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	return resp.NeedsSetup, nil
+}
+
+// GetCICallbackURL discovers the CI OIDC callback URL registered by a
+// worker granted an environment with a provider+repo pipeline — scoped this
+// way so the answer can't be hijacked by a worker unrelated to this repo.
+// Unauthenticated, since the value isn't sensitive and a CI job calling this
+// has no session token of its own yet.
+func (c *Client) GetCICallbackURL(ctx context.Context, provider, repo string) (string, error) {
+	path := "/v1/ci/callback-url?provider=" + url.QueryEscape(provider) + "&repo=" + url.QueryEscape(repo)
+	var resp struct {
+		URL string `json:"url"`
+	}
+	if err := c.do(ctx, http.MethodGet, path, "", nil, &resp); err != nil {
+		return "", err
+	}
+	return resp.URL, nil
 }
 
 // SetupRequest is POST /v1/setup's request body.

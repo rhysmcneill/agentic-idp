@@ -19,5 +19,6 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newWorkerCmd())
 	root.AddCommand(newPipelineCmd())
 	root.AddCommand(newRunCmd())
+	root.AddCommand(newCICmd())
 	return root
 }

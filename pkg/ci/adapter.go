@@ -16,14 +16,17 @@ type Adapter interface {
 	// onboarding rather than mid-deploy.
 	ValidateConfig(ctx context.Context, cfg Config) error
 
-	// Implementations must inject req.Correlation into the external run, as a
-	// workflow input, pipeline variable or build parameter. Without it the run
-	// cannot be discovered and its OIDC callback cannot be matched to the
-	// record that authorised it.
+	// Discovery happens one of two ways: an OIDCCallback-capable adapter
+	// resolves the external run from a verified callback's own claims (its
+	// run ID needs no injecting), so req.Correlation only needs injecting
+	// into the external run — as a workflow input, pipeline variable or
+	// build parameter — for a provider without that capability, where
+	// Resolve is the only way to find the run at all.
 	Trigger(ctx context.Context, cfg Config, req TriggerRequest) (Handle, error)
 
 	// Returns ErrNotFound while the run has not yet appeared. Adapters whose
-	// Trigger reports an ID return h unchanged.
+	// Trigger reports an ID, or whose discovery instead happens via an OIDC
+	// callback (see Capabilities.OIDCCallback), return h unchanged.
 	Resolve(ctx context.Context, cfg Config, h Handle) (Handle, error)
 
 	Status(ctx context.Context, cfg Config, h Handle) (RunStatus, error)
