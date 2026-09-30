@@ -122,7 +122,14 @@ func resolvedRun() controlplane.ResolvedRun {
 }
 
 func TestHandler_Success(t *testing.T) {
-	cp := &fakeResolveClient{resolved: resolvedRun()}
+	// Shrink the poll so the handler's detached goroutine finishes within
+	// this test instead of racing later tests' mutation of these vars.
+	origInterval, origTimeout := pollInterval, pollTimeout
+	pollInterval, pollTimeout = time.Millisecond, time.Second
+	t.Cleanup(func() { pollInterval, pollTimeout = origInterval, origTimeout })
+
+	done := make(chan struct{})
+	cp := &fakeResolveClient{resolved: resolvedRun(), reportDone: done}
 	registry := NewRegistry(&fakeVerifier{provider: ci.ProviderGitHubActions, claims: Claims{Repo: "acme/widgets", RunID: "42"}})
 	h := NewHandler(registry, cp, &fakeBroker{}, &fakeStatusAdapter{statuses: []ci.RunStatus{{Status: ci.StatusSucceeded}}}, fakeGitHubCredential{})
 
@@ -144,6 +151,12 @@ func TestHandler_Success(t *testing.T) {
 	}
 	if creds.AccessKeyID != "AKIATEST" {
 		t.Errorf("AccessKeyID = %q, want %q", creds.AccessKeyID, "AKIATEST")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ReportRunResult was never called")
 	}
 }
 
