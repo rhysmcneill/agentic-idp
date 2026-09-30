@@ -17,20 +17,20 @@ func newPipelineCmd() *cobra.Command {
 		Use:   "pipeline",
 		Short: "Manage pipelines",
 	}
-	pipeline.AddCommand(newPipelineCreateCmd())
+	pipeline.AddCommand(newPipelineRegisterCmd())
 	pipeline.AddCommand(newPipelineGetCmd())
 	return pipeline
 }
 
-func newPipelineCreateCmd() *cobra.Command {
+func newPipelineRegisterCmd() *cobra.Command {
 	var environmentID, provider, workflowRef string
 	var settings []string
 	var mutating bool
 	var mutatingSet bool
 
 	cmd := &cobra.Command{
-		Use:   "create",
-		Short: "Register a pipeline",
+		Use:   "register",
+		Short: "Register a governed binding for a pipeline you already own",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			settingsMap, err := parseSettings(settings)
 			if err != nil {
@@ -40,7 +40,7 @@ func newPipelineCreateCmd() *cobra.Command {
 			if mutatingSet {
 				mutatingPtr = &mutating
 			}
-			return runPipelineCreate(cmd.Context(), pipelineCreateParams{
+			return runPipelineRegister(cmd.Context(), pipelineRegisterParams{
 				environmentID: environmentID,
 				provider:      provider,
 				workflowRef:   workflowRef,
@@ -56,7 +56,7 @@ func newPipelineCreateCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&mutating, "mutating", false, "whether this pipeline can mutate the environment — only an autonomous-tier actor may set this false")
 	for _, f := range []string{"environment-id", "provider", "workflow-ref"} {
 		if err := cmd.MarkFlagRequired(f); err != nil {
-			panic(fmt.Sprintf("idpctl: wiring up pipeline create flags: %v", err))
+			panic(fmt.Sprintf("idpctl: wiring up pipeline register flags: %v", err))
 		}
 	}
 	cmd.PreRun = func(cmd *cobra.Command, _ []string) {
@@ -80,13 +80,13 @@ func parseSettings(pairs []string) (map[string]string, error) {
 	return out, nil
 }
 
-type pipelineCreateParams struct {
+type pipelineRegisterParams struct {
 	environmentID, provider, workflowRef string
 	settings                             map[string]string
 	mutating                             *bool
 }
 
-func runPipelineCreate(ctx context.Context, p pipelineCreateParams) error {
+func runPipelineRegister(ctx context.Context, p pipelineRegisterParams) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("loading session: %w", err)

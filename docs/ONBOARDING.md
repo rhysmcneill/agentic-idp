@@ -10,11 +10,11 @@ The dependency chain is strict, and the first step exists because of a chicken-a
 1. Install control plane      (customer infrastructure)
 2. Create tier IAM roles      (customer AWS — our Terraform module)
 3. Register Environment       (role ARNs + external ID → control plane)
-4. Deploy worker              (customer AWS account)
+4. Deploy worker              (customer AWS account; register a GitHub App first if using GitHub Actions pipelines)
 5. Grant worker environments  (self-registered by default, or manual)
 6. Verify connectivity        (worker assumes each tier role)
 7. Create actors + teams      (humans, then agent identities)
-8. Wire one pipeline          (add our composite Action to one workflow)
+8. Register + wire one pipeline (idpctl pipeline register + a small snippet in one workflow)
 9. First governed run         (staging, Autonomous tier, unattended)
 ```
 
@@ -91,6 +91,23 @@ idpctl worker enrol --name worker-staging --environments staging
 
 The output token is shown once and is the operator's own responsibility to get onto the worker. The worker reads it from `IDP_WORKER_TOKEN` (the value directly) or `IDP_WORKER_TOKEN_FILE` (a path to read it from) — exactly one of the two, and neither combined with the bootstrap env vars above.
 
+### 4a. Register a GitHub App (only if any pipeline is `github_actions`)
+
+Skip this entirely if no governed pipeline uses GitHub Actions — a worker with neither `IDP_GITHUB_APP_ID` nor `IDP_CI_CALLBACK_URL` set never starts the CI OIDC callback server at all.
+
+GitHub has no equivalent of AWS's keyless federation for *triggering* a workflow — calling `workflow_dispatch` always needs some GitHub-issued credential. A GitHub App minimises the footprint: one App, one private key, for the whole worker deployment, regardless of how many repos/environments it governs.
+
+1. In the customer's GitHub org: Settings → Developer settings → GitHub Apps → New. Permission: `Actions: Read & write`. No webhook needed — this App is only ever used outbound.
+2. Download the generated private key (shown once) and note the App ID.
+3. Install the App on whichever repos will be governed.
+4. Set on the worker, alongside its other config:
+   - `IDP_GITHUB_APP_ID` — the App's numeric ID (not secret)
+   - `IDP_GITHUB_APP_PRIVATE_KEY` or `IDP_GITHUB_APP_PRIVATE_KEY_FILE` — the downloaded key, via the same env-var/Docker-secret/Kubernetes-Secret mechanism as `IDP_WORKER_TOKEN` above
+   - `IDP_CI_CALLBACK_URL` — **required** whenever `IDP_GITHUB_APP_ID` is set (the worker fails to start otherwise; there's no default because a process can't introspect its own externally-reachable address). Internal-only (e.g. `http://worker.internal.svc.cluster.local:8443/...`) if every governed pipeline runs on self-hosted runners sharing the worker's network; a real public HTTPS address behind the customer's own ingress/TLS if any governed pipeline uses GitHub-hosted (SaaS) runners, since those run entirely outside the customer's network
+   - `IDP_CI_LISTEN_ADDR` — optional, defaults to `:8443` (the local bind address, distinct from the callback URL above)
+
+The worker registers its own `IDP_CI_CALLBACK_URL` with the control plane once at startup — nothing else needs to be told this value separately; `idpctl ci auth` (step 8) discovers it automatically.
+
 ## 5. Grant the worker its environments
 
 A self-registered worker (or one enrolled manually with a narrower scope) needs its environments attached before it can do anything. `idpctl worker enrol`/self-registration output the worker credential ID at the time — `idpctl worker list` finds it again later by the name you gave the worker (`IDP_WORKER_NAME`), so nobody has to go digging through worker startup logs:
@@ -128,18 +145,43 @@ The output token is short-lived and individually revocable. The mint is audited,
 
 Note that **an actor cannot grant an agent more authority than it holds itself**, so whoever runs this must already hold the tier being granted. See [AGENT-MODEL.md](AGENT-MODEL.md).
 
-## 8. Wire one pipeline
+## 8. Register + wire one pipeline
 
-The single step with real friction. Add our composite Action to one workflow so it fetches tier-scoped credentials from the control plane rather than assuming its own role:
+Two parts: registering the binding (metadata only — this never touches the workflow's own content), then a small, real edit to the workflow itself. Full reference: [CI-INTEGRATION.md](CI-INTEGRATION.md).
 
-```yaml
-- uses: <org>/agentic-idp/actions/credentials@v1
-  with:
-    control-plane: https://idp.internal
-    # correlation is injected automatically by the trigger
+**Register.** This points the control plane at a pipeline the customer already owns and authors themselves — it does not create or upload any pipeline logic:
+
+```bash
+idpctl pipeline register \
+  --environment-id <id> \
+  --provider github_actions \
+  --workflow-ref .github/workflows/deploy.yml \
+  --setting repo=acme/widgets \
+  --mutating
 ```
 
-**Be honest with prospects about this step.** It is the difference between "drop-in" and "rewire your CI", and it is the primary thing to validate before building further. If a design partner refuses here, that is the signal — not a documentation problem.
+This has to happen **before** the first CI run for that repo ever calls `idpctl ci auth` (step below) — the discovery mechanism it relies on matches through the registered pipeline, so it 404s for an unregistered repo even once the worker itself is fully configured.
+
+**Wire the workflow.** The single step with real friction, and the one to be upfront with prospects about — it's the difference between "drop-in" and "rewire your CI," and the primary thing to validate before building further. If a design partner refuses here, that's the signal, not a documentation problem.
+
+```yaml
+permissions:
+  id-token: write   # requests the OIDC token idpctl ci auth needs
+
+jobs:
+  deploy:
+    steps:
+      - run: idpctl ci auth --format=credential-process > /tmp/idp-creds
+      # or, to hand credentials to the AWS SDK/CLI transparently and
+      # auto-refresh for a long-running job, add an AWS profile instead:
+      #   [profile idp-governed]
+      #   credential_process = idpctl ci auth --format=credential-process
+      - run: ./deploy.sh
+        env:
+          AWS_PROFILE: idp-governed
+```
+
+No `--callback-url` flag and no correlation ID to wire up by hand — `idpctl ci auth` discovers the callback from the control plane itself (using `GITHUB_REPOSITORY`, which GitHub sets automatically) and the OIDC token's own verified claims (repo, workflow, branch, run ID) are what get matched to the run, not anything the workflow has to assert.
 
 Start with one non-production workflow. Do not ask anyone to convert their estate.
 
@@ -174,5 +216,5 @@ Tracked honestly so it can be designed away rather than defended:
 |---|---|---|
 | 2 | Requires Terraform apply with elevated IAM permissions | Ship a CloudFormation one-click alternative |
 | 4 | A second thing to deploy and operate | Document running it as a sidecar to existing CI runners |
-| 8 | **Modifying an existing workflow** | Make the Action a single line; consider a read-only trial mode that proves value before requiring the change |
+| 8 | **Modifying an existing workflow, at scale across many repos** | `idpctl ci auth` keeps the edit small (a permissions line + one command) with no external Action to trust — see [CI-INTEGRATION.md](CI-INTEGRATION.md). For dozens/hundreds of repos, point customers at defining their own thin composite Action wrapping the same command in their own org (one line to reference, centrally updatable) rather than repeating it raw everywhere; Phase 2's scaffold-new-service action makes this zero-cost for anything created afterward, so the pain is specifically a one-time migration for existing repos, not a recurring tax |
 | 7 | Manual token distribution to agents | MCP-based enrolment in Phase 2 |

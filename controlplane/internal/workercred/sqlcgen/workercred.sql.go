@@ -7,12 +7,13 @@ package sqlcgen
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
 )
 
 const createWorkerCredential = `-- name: CreateWorkerCredential :one
-INSERT INTO worker_credentials (tenant_id, name, token_hash) VALUES ($1, $2, $3) RETURNING id, tenant_id, name, token_hash, created_at, revoked_at
+INSERT INTO worker_credentials (tenant_id, name, token_hash) VALUES ($1, $2, $3) RETURNING id, tenant_id, name, token_hash, created_at, revoked_at, ci_callback_url
 `
 
 type CreateWorkerCredentialParams struct {
@@ -31,12 +32,40 @@ func (q *Queries) CreateWorkerCredential(ctx context.Context, arg CreateWorkerCr
 		&i.TokenHash,
 		&i.CreatedAt,
 		&i.RevokedAt,
+		&i.CiCallbackUrl,
 	)
 	return i, err
 }
 
+const getCICallbackURLForRepo = `-- name: GetCICallbackURLForRepo :one
+SELECT wc.ci_callback_url FROM worker_credentials wc
+JOIN worker_credential_environments wce ON wce.worker_credential_id = wc.id
+JOIN pipelines p ON p.environment_id = wce.environment_id
+WHERE wc.ci_callback_url IS NOT NULL
+  AND wc.revoked_at IS NULL
+  AND p.provider = $1
+  AND (p.settings->>'repo')::text = $2::text
+ORDER BY wc.created_at DESC
+LIMIT 1
+`
+
+type GetCICallbackURLForRepoParams struct {
+	Provider string `json:"provider"`
+	Repo     string `json:"repo"`
+}
+
+// Scoped to workers actually granted an environment that has a pipeline
+// registered for repo+provider — a worker credential for one environment
+// must not be able to answer discovery for a repo it has no relationship to.
+func (q *Queries) GetCICallbackURLForRepo(ctx context.Context, arg GetCICallbackURLForRepoParams) (sql.NullString, error) {
+	row := q.db.QueryRowContext(ctx, getCICallbackURLForRepo, arg.Provider, arg.Repo)
+	var ci_callback_url sql.NullString
+	err := row.Scan(&ci_callback_url)
+	return ci_callback_url, err
+}
+
 const getWorkerCredential = `-- name: GetWorkerCredential :one
-SELECT id, tenant_id, name, token_hash, created_at, revoked_at FROM worker_credentials WHERE id = $1
+SELECT id, tenant_id, name, token_hash, created_at, revoked_at, ci_callback_url FROM worker_credentials WHERE id = $1
 `
 
 func (q *Queries) GetWorkerCredential(ctx context.Context, id uuid.UUID) (WorkerCredential, error) {
@@ -49,12 +78,13 @@ func (q *Queries) GetWorkerCredential(ctx context.Context, id uuid.UUID) (Worker
 		&i.TokenHash,
 		&i.CreatedAt,
 		&i.RevokedAt,
+		&i.CiCallbackUrl,
 	)
 	return i, err
 }
 
 const getWorkerCredentialByTenantAndName = `-- name: GetWorkerCredentialByTenantAndName :one
-SELECT id, tenant_id, name, token_hash, created_at, revoked_at FROM worker_credentials WHERE tenant_id = $1 AND name = $2 AND revoked_at IS NULL
+SELECT id, tenant_id, name, token_hash, created_at, revoked_at, ci_callback_url FROM worker_credentials WHERE tenant_id = $1 AND name = $2 AND revoked_at IS NULL
 `
 
 type GetWorkerCredentialByTenantAndNameParams struct {
@@ -72,12 +102,13 @@ func (q *Queries) GetWorkerCredentialByTenantAndName(ctx context.Context, arg Ge
 		&i.TokenHash,
 		&i.CreatedAt,
 		&i.RevokedAt,
+		&i.CiCallbackUrl,
 	)
 	return i, err
 }
 
 const getWorkerCredentialByTokenHash = `-- name: GetWorkerCredentialByTokenHash :one
-SELECT id, tenant_id, name, token_hash, created_at, revoked_at FROM worker_credentials WHERE token_hash = $1 AND revoked_at IS NULL
+SELECT id, tenant_id, name, token_hash, created_at, revoked_at, ci_callback_url FROM worker_credentials WHERE token_hash = $1 AND revoked_at IS NULL
 `
 
 func (q *Queries) GetWorkerCredentialByTokenHash(ctx context.Context, tokenHash string) (WorkerCredential, error) {
@@ -90,6 +121,7 @@ func (q *Queries) GetWorkerCredentialByTokenHash(ctx context.Context, tokenHash 
 		&i.TokenHash,
 		&i.CreatedAt,
 		&i.RevokedAt,
+		&i.CiCallbackUrl,
 	)
 	return i, err
 }
@@ -138,7 +170,7 @@ func (q *Queries) ListWorkerCredentialEnvironments(ctx context.Context, workerCr
 }
 
 const listWorkerCredentials = `-- name: ListWorkerCredentials :many
-SELECT id, tenant_id, name, token_hash, created_at, revoked_at FROM worker_credentials WHERE tenant_id = $1 ORDER BY name
+SELECT id, tenant_id, name, token_hash, created_at, revoked_at, ci_callback_url FROM worker_credentials WHERE tenant_id = $1 ORDER BY name
 `
 
 func (q *Queries) ListWorkerCredentials(ctx context.Context, tenantID uuid.UUID) ([]WorkerCredential, error) {
@@ -157,6 +189,7 @@ func (q *Queries) ListWorkerCredentials(ctx context.Context, tenantID uuid.UUID)
 			&i.TokenHash,
 			&i.CreatedAt,
 			&i.RevokedAt,
+			&i.CiCallbackUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -172,7 +205,7 @@ func (q *Queries) ListWorkerCredentials(ctx context.Context, tenantID uuid.UUID)
 }
 
 const rotateWorkerCredentialToken = `-- name: RotateWorkerCredentialToken :one
-UPDATE worker_credentials SET token_hash = $2 WHERE id = $1 RETURNING id, tenant_id, name, token_hash, created_at, revoked_at
+UPDATE worker_credentials SET token_hash = $2 WHERE id = $1 RETURNING id, tenant_id, name, token_hash, created_at, revoked_at, ci_callback_url
 `
 
 type RotateWorkerCredentialTokenParams struct {
@@ -190,6 +223,31 @@ func (q *Queries) RotateWorkerCredentialToken(ctx context.Context, arg RotateWor
 		&i.TokenHash,
 		&i.CreatedAt,
 		&i.RevokedAt,
+		&i.CiCallbackUrl,
+	)
+	return i, err
+}
+
+const setWorkerCICallbackURL = `-- name: SetWorkerCICallbackURL :one
+UPDATE worker_credentials SET ci_callback_url = $2 WHERE id = $1 RETURNING id, tenant_id, name, token_hash, created_at, revoked_at, ci_callback_url
+`
+
+type SetWorkerCICallbackURLParams struct {
+	ID            uuid.UUID      `json:"id"`
+	CiCallbackUrl sql.NullString `json:"ci_callback_url"`
+}
+
+func (q *Queries) SetWorkerCICallbackURL(ctx context.Context, arg SetWorkerCICallbackURLParams) (WorkerCredential, error) {
+	row := q.db.QueryRowContext(ctx, setWorkerCICallbackURL, arg.ID, arg.CiCallbackUrl)
+	var i WorkerCredential
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Name,
+		&i.TokenHash,
+		&i.CreatedAt,
+		&i.RevokedAt,
+		&i.CiCallbackUrl,
 	)
 	return i, err
 }

@@ -11,11 +11,18 @@ import (
 )
 
 type Querier interface {
+	ClaimNextExecutingRun(ctx context.Context, arg ClaimNextExecutingRunParams) (Run, error)
 	CreateApproval(ctx context.Context, runID uuid.UUID) (Approval, error)
 	CreateRun(ctx context.Context, arg CreateRunParams) (Run, error)
 	DecideApproval(ctx context.Context, arg DecideApprovalParams) (Approval, error)
+	FindUnresolvedExecutingRuns(ctx context.Context, arg FindUnresolvedExecutingRunsParams) ([]Run, error)
 	GetApprovalByRunID(ctx context.Context, runID uuid.UUID) (Approval, error)
 	GetRun(ctx context.Context, arg GetRunParams) (Run, error)
+	// Only a worker that still holds the claim (status = 'executing', claimed_by
+	// matches) may report a result — mirrors verification.Complete's guard so a
+	// stolen worker credential can't forge results for another worker's claim.
+	ReportRunResult(ctx context.Context, arg ReportRunResultParams) (Run, error)
+	ResolveRunExternalRef(ctx context.Context, arg ResolveRunExternalRefParams) (Run, error)
 	UpdateRunStatus(ctx context.Context, arg UpdateRunStatusParams) (Run, error)
 }
 

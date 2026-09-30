@@ -232,6 +232,8 @@ type Run struct {
 	StartedAt      sql.NullTime   `json:"started_at"`
 	FinishedAt     sql.NullTime   `json:"finished_at"`
 	CreatedAt      time.Time      `json:"created_at"`
+	ClaimedBy      uuid.NullUUID  `json:"claimed_by"`
+	ClaimedAt      sql.NullTime   `json:"claimed_at"`
 }
 
 type SigningKey struct {
@@ -254,12 +256,13 @@ type Tenant struct {
 }
 
 type WorkerCredential struct {
-	ID        uuid.UUID    `json:"id"`
-	TenantID  uuid.UUID    `json:"tenant_id"`
-	Name      string       `json:"name"`
-	TokenHash string       `json:"token_hash"`
-	CreatedAt time.Time    `json:"created_at"`
-	RevokedAt sql.NullTime `json:"revoked_at"`
+	ID            uuid.UUID      `json:"id"`
+	TenantID      uuid.UUID      `json:"tenant_id"`
+	Name          string         `json:"name"`
+	TokenHash     string         `json:"token_hash"`
+	CreatedAt     time.Time      `json:"created_at"`
+	RevokedAt     sql.NullTime   `json:"revoked_at"`
+	CiCallbackUrl sql.NullString `json:"ci_callback_url"`
 }
 
 type WorkerCredentialEnvironment struct {

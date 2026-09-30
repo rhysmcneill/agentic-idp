@@ -47,7 +47,7 @@ The differentiator. This is the phase to validate with design partners.
 - Run state machine and Postgres-backed job queue
 - Approval workflow (CLI only — see Phase 2 for the Slack webhook half, deferred until OIDC gives human actors a verified identity to link a Slack account against)
 - **GitHub Actions adapter only**, behind the generic `pkg/ci` interface
-- CI OIDC callback (`internal/ciauth`): verify token, match correlation, broker tier-scoped credentials — built for both self-hosted and SaaS/cloud-hosted CI from the start (an internal callback for the former, a public TLS-terminated one for the latter), per [Decision 021](DECISIONS.md), not the self-hosted case alone with SaaS retrofitted later
+- CI OIDC callback (`worker/internal/ciauth`): verify token, match correlation, broker tier-scoped credentials — built for both self-hosted and SaaS/cloud-hosted CI from the start (an internal callback for the former, a public TLS-terminated one for the latter), per [Decision 021](DECISIONS.md), not the self-hosted case alone with SaaS retrofitted later
 - Per-run cost capture
 - Opt-in telemetry
 

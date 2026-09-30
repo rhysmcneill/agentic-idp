@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -40,6 +41,10 @@ var ErrPolicyDenied = errors.New("execution: denied by policy")
 // ErrAlreadyDecided is returned by Decide when the approval was already decided.
 var ErrAlreadyDecided = errors.New("execution: approval already decided")
 
+// ErrAmbiguousMatch is returned by ResolveExternalRef when more than one run
+// matches — never guessed at, always failed closed.
+var ErrAmbiguousMatch = errors.New("execution: ambiguous match")
+
 // Run is a single execution of a Pipeline, requested by an Actor.
 type Run struct {
 	ID             uuid.UUID
@@ -59,6 +64,8 @@ type Run struct {
 	StartedAt      *time.Time
 	FinishedAt     *time.Time
 	CreatedAt      time.Time
+	ClaimedBy      *uuid.UUID
+	ClaimedAt      *time.Time
 }
 
 // Approval is one row per Run that reaches StatusAwaitingApproval; its absence is the signal no human check occurred.
@@ -266,6 +273,121 @@ func (s *Store) GetApproval(ctx context.Context, runID uuid.UUID) (Approval, err
 	return fromApprovalRow(row), nil
 }
 
+// Claim atomically claims the oldest un-claimed executing run scoped to one
+// of environmentIDs on behalf of workerCredentialID, or ErrNotFound if none
+// is executing. Mirrors verification.Store.Claim's FOR UPDATE SKIP LOCKED
+// pattern — safe under concurrent pollers, since two workers (or two poll
+// ticks) never claim the same run.
+func (s *Store) Claim(ctx context.Context, workerCredentialID uuid.UUID, environmentIDs []uuid.UUID) (Run, error) {
+	if workerCredentialID == uuid.Nil {
+		return Run{}, fmt.Errorf("execution: claim: worker credential id is required")
+	}
+	if len(environmentIDs) == 0 {
+		return Run{}, ErrNotFound
+	}
+
+	row, err := s.q.ClaimNextExecutingRun(ctx, sqlcgen.ClaimNextExecutingRunParams{
+		ClaimedBy:      uuid.NullUUID{UUID: workerCredentialID, Valid: true},
+		EnvironmentIds: environmentIDs,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return Run{}, ErrNotFound
+	}
+	if err != nil {
+		return Run{}, fmt.Errorf("execution: claim: %w", err)
+	}
+	return fromRunRow(row), nil
+}
+
+// RunResult is the outcome a worker reports for a claimed run.
+type RunResult struct {
+	Status        string // one of StatusSucceeded, StatusFailed, StatusCancelled, StatusTimedOut
+	CIExternalRef string
+	CIURL         string
+	CIRawStatus   string
+}
+
+// ReportResult records result against runID, but only if it is still claimed
+// by workerCredentialID and still executing — a worker cannot complete a run
+// it didn't claim, or one that already finished. Returns ErrNotFound otherwise.
+func (s *Store) ReportResult(ctx context.Context, runID, workerCredentialID uuid.UUID, result RunResult) (Run, error) {
+	row, err := s.q.ReportRunResult(ctx, sqlcgen.ReportRunResultParams{
+		NewStatus:     result.Status,
+		CiExternalRef: nullString(result.CIExternalRef),
+		CiUrl:         nullString(result.CIURL),
+		CiRawStatus:   nullString(result.CIRawStatus),
+		ID:            runID,
+		ClaimedBy:     uuid.NullUUID{UUID: workerCredentialID, Valid: true},
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return Run{}, ErrNotFound
+	}
+	if err != nil {
+		return Run{}, fmt.Errorf("execution: report result: %w", err)
+	}
+	return fromRunRow(row), nil
+}
+
+// ResolveExternalRef finds the single executing, not-yet-resolved run for a
+// pipeline matching provider+repo+workflowRef+ref, scoped to environmentIDs,
+// and records ciExternalRef/ciURL against it. ErrNotFound if none match,
+// ErrAmbiguousMatch if more than one does — e.g. two pipelines registered
+// against the same repo, workflow and branch in different environments.
+func (s *Store) ResolveExternalRef(ctx context.Context, environmentIDs []uuid.UUID, provider, repo, workflowRef, ref, ciExternalRef, ciURL string) (Run, error) {
+	candidates, err := s.q.FindUnresolvedExecutingRuns(ctx, sqlcgen.FindUnresolvedExecutingRunsParams{
+		EnvironmentIds: environmentIDs,
+		Provider:       provider,
+		Repo:           repo,
+		WorkflowRef:    workflowRef,
+	})
+	if err != nil {
+		return Run{}, fmt.Errorf("execution: resolve external ref: finding candidates: %w", err)
+	}
+
+	var match *sqlcgen.Run
+	for i := range candidates {
+		p, err := s.pipelines.Get(ctx, candidates[i].TenantID, candidates[i].PipelineID)
+		if err != nil {
+			return Run{}, fmt.Errorf("execution: resolve external ref: loading pipeline: %w", err)
+		}
+		if normalizeRef(p.Settings["ref"]) != ref {
+			continue
+		}
+		if match != nil {
+			return Run{}, ErrAmbiguousMatch
+		}
+		match = &candidates[i]
+	}
+	if match == nil {
+		return Run{}, ErrNotFound
+	}
+
+	row, err := s.q.ResolveRunExternalRef(ctx, sqlcgen.ResolveRunExternalRefParams{
+		ID:            match.ID,
+		CiExternalRef: nullString(ciExternalRef),
+		CiUrl:         nullString(ciURL),
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return Run{}, ErrNotFound
+	}
+	if err != nil {
+		return Run{}, fmt.Errorf("execution: resolve external ref: %w", err)
+	}
+	return fromRunRow(row), nil
+}
+
+// normalizeRef expands a bare branch/tag setting (the pipeline's default,
+// "main") to the full ref form GitHub's verified claims carry.
+func normalizeRef(settingRef string) string {
+	if settingRef == "" {
+		settingRef = "main"
+	}
+	if strings.HasPrefix(settingRef, "refs/") {
+		return settingRef
+	}
+	return "refs/heads/" + settingRef
+}
+
 // transitionStatus guardedly moves runID from oldStatus to newStatus; 0 rows affected surfaces as sql.ErrNoRows.
 func (s *Store) transitionStatus(ctx context.Context, runID uuid.UUID, oldStatus, newStatus string) (Run, error) {
 	row, err := s.q.UpdateRunStatus(ctx, sqlcgen.UpdateRunStatusParams{
@@ -318,6 +440,14 @@ func fromRunRow(row sqlcgen.Run) Run {
 	if row.FinishedAt.Valid {
 		t := row.FinishedAt.Time
 		r.FinishedAt = &t
+	}
+	if row.ClaimedBy.Valid {
+		id := row.ClaimedBy.UUID
+		r.ClaimedBy = &id
+	}
+	if row.ClaimedAt.Valid {
+		t := row.ClaimedAt.Time
+		r.ClaimedAt = &t
 	}
 	return r
 }

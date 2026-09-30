@@ -10,7 +10,55 @@ import (
 	"database/sql"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
+
+const claimNextExecutingRun = `-- name: ClaimNextExecutingRun :one
+WITH next AS (
+    SELECT id FROM runs
+    WHERE status = 'executing' AND claimed_by IS NULL AND environment_id = ANY($2::uuid[])
+    ORDER BY requested_at
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+)
+UPDATE runs
+SET claimed_by = $1, claimed_at = now()
+WHERE id = (SELECT id FROM next)
+RETURNING id, tenant_id, actor_id, environment_id, binding_id, pipeline_id, tier, status, ci_provider, ci_external_ref, ci_raw_status, ci_url, idempotency_key, diff_ref, requested_at, started_at, finished_at, created_at, claimed_by, claimed_at
+`
+
+type ClaimNextExecutingRunParams struct {
+	ClaimedBy      uuid.NullUUID `json:"claimed_by"`
+	EnvironmentIds []uuid.UUID   `json:"environment_ids"`
+}
+
+func (q *Queries) ClaimNextExecutingRun(ctx context.Context, arg ClaimNextExecutingRunParams) (Run, error) {
+	row := q.db.QueryRowContext(ctx, claimNextExecutingRun, arg.ClaimedBy, pq.Array(arg.EnvironmentIds))
+	var i Run
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ActorID,
+		&i.EnvironmentID,
+		&i.BindingID,
+		&i.PipelineID,
+		&i.Tier,
+		&i.Status,
+		&i.CiProvider,
+		&i.CiExternalRef,
+		&i.CiRawStatus,
+		&i.CiUrl,
+		&i.IdempotencyKey,
+		&i.DiffRef,
+		&i.RequestedAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.ClaimedBy,
+		&i.ClaimedAt,
+	)
+	return i, err
+}
 
 const createApproval = `-- name: CreateApproval :one
 INSERT INTO approvals (run_id) VALUES ($1) RETURNING id, run_id, requested_at, approver_actor_id, decision, decided_at
@@ -37,7 +85,7 @@ INSERT INTO runs (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9
 )
-RETURNING id, tenant_id, actor_id, environment_id, binding_id, pipeline_id, tier, status, ci_provider, ci_external_ref, ci_raw_status, ci_url, idempotency_key, diff_ref, requested_at, started_at, finished_at, created_at
+RETURNING id, tenant_id, actor_id, environment_id, binding_id, pipeline_id, tier, status, ci_provider, ci_external_ref, ci_raw_status, ci_url, idempotency_key, diff_ref, requested_at, started_at, finished_at, created_at, claimed_by, claimed_at
 `
 
 type CreateRunParams struct {
@@ -84,6 +132,8 @@ func (q *Queries) CreateRun(ctx context.Context, arg CreateRunParams) (Run, erro
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.CreatedAt,
+		&i.ClaimedBy,
+		&i.ClaimedAt,
 	)
 	return i, err
 }
@@ -115,6 +165,74 @@ func (q *Queries) DecideApproval(ctx context.Context, arg DecideApprovalParams) 
 	return i, err
 }
 
+const findUnresolvedExecutingRuns = `-- name: FindUnresolvedExecutingRuns :many
+SELECT r.id, r.tenant_id, r.actor_id, r.environment_id, r.binding_id, r.pipeline_id, r.tier, r.status, r.ci_provider, r.ci_external_ref, r.ci_raw_status, r.ci_url, r.idempotency_key, r.diff_ref, r.requested_at, r.started_at, r.finished_at, r.created_at, r.claimed_by, r.claimed_at FROM runs r
+JOIN pipelines p ON p.id = r.pipeline_id
+WHERE r.status = 'executing'
+  AND r.ci_external_ref IS NULL
+  AND r.environment_id = ANY($1::uuid[])
+  AND p.provider = $2
+  AND (p.settings->>'repo')::text = $3::text
+  AND p.workflow_ref = $4
+ORDER BY r.requested_at
+`
+
+type FindUnresolvedExecutingRunsParams struct {
+	EnvironmentIds []uuid.UUID `json:"environment_ids"`
+	Provider       string      `json:"provider"`
+	Repo           string      `json:"repo"`
+	WorkflowRef    string      `json:"workflow_ref"`
+}
+
+func (q *Queries) FindUnresolvedExecutingRuns(ctx context.Context, arg FindUnresolvedExecutingRunsParams) ([]Run, error) {
+	rows, err := q.db.QueryContext(ctx, findUnresolvedExecutingRuns,
+		pq.Array(arg.EnvironmentIds),
+		arg.Provider,
+		arg.Repo,
+		arg.WorkflowRef,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Run
+	for rows.Next() {
+		var i Run
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ActorID,
+			&i.EnvironmentID,
+			&i.BindingID,
+			&i.PipelineID,
+			&i.Tier,
+			&i.Status,
+			&i.CiProvider,
+			&i.CiExternalRef,
+			&i.CiRawStatus,
+			&i.CiUrl,
+			&i.IdempotencyKey,
+			&i.DiffRef,
+			&i.RequestedAt,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.CreatedAt,
+			&i.ClaimedBy,
+			&i.ClaimedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getApprovalByRunID = `-- name: GetApprovalByRunID :one
 SELECT id, run_id, requested_at, approver_actor_id, decision, decided_at FROM approvals WHERE run_id = $1
 `
@@ -134,7 +252,7 @@ func (q *Queries) GetApprovalByRunID(ctx context.Context, runID uuid.UUID) (Appr
 }
 
 const getRun = `-- name: GetRun :one
-SELECT id, tenant_id, actor_id, environment_id, binding_id, pipeline_id, tier, status, ci_provider, ci_external_ref, ci_raw_status, ci_url, idempotency_key, diff_ref, requested_at, started_at, finished_at, created_at FROM runs WHERE tenant_id = $1 AND id = $2
+SELECT id, tenant_id, actor_id, environment_id, binding_id, pipeline_id, tier, status, ci_provider, ci_external_ref, ci_raw_status, ci_url, idempotency_key, diff_ref, requested_at, started_at, finished_at, created_at, claimed_by, claimed_at FROM runs WHERE tenant_id = $1 AND id = $2
 `
 
 type GetRunParams struct {
@@ -164,6 +282,107 @@ func (q *Queries) GetRun(ctx context.Context, arg GetRunParams) (Run, error) {
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.CreatedAt,
+		&i.ClaimedBy,
+		&i.ClaimedAt,
+	)
+	return i, err
+}
+
+const reportRunResult = `-- name: ReportRunResult :one
+UPDATE runs
+SET status = $1::text,
+    ci_external_ref = $2,
+    ci_url = $3,
+    ci_raw_status = $4,
+    finished_at = CASE WHEN $1::text IN ('succeeded', 'failed', 'cancelled', 'timed_out') THEN now() ELSE finished_at END
+WHERE id = $5 AND claimed_by = $6 AND status = 'executing'
+RETURNING id, tenant_id, actor_id, environment_id, binding_id, pipeline_id, tier, status, ci_provider, ci_external_ref, ci_raw_status, ci_url, idempotency_key, diff_ref, requested_at, started_at, finished_at, created_at, claimed_by, claimed_at
+`
+
+type ReportRunResultParams struct {
+	NewStatus     string         `json:"new_status"`
+	CiExternalRef sql.NullString `json:"ci_external_ref"`
+	CiUrl         sql.NullString `json:"ci_url"`
+	CiRawStatus   sql.NullString `json:"ci_raw_status"`
+	ID            uuid.UUID      `json:"id"`
+	ClaimedBy     uuid.NullUUID  `json:"claimed_by"`
+}
+
+// Only a worker that still holds the claim (status = 'executing', claimed_by
+// matches) may report a result — mirrors verification.Complete's guard so a
+// stolen worker credential can't forge results for another worker's claim.
+func (q *Queries) ReportRunResult(ctx context.Context, arg ReportRunResultParams) (Run, error) {
+	row := q.db.QueryRowContext(ctx, reportRunResult,
+		arg.NewStatus,
+		arg.CiExternalRef,
+		arg.CiUrl,
+		arg.CiRawStatus,
+		arg.ID,
+		arg.ClaimedBy,
+	)
+	var i Run
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ActorID,
+		&i.EnvironmentID,
+		&i.BindingID,
+		&i.PipelineID,
+		&i.Tier,
+		&i.Status,
+		&i.CiProvider,
+		&i.CiExternalRef,
+		&i.CiRawStatus,
+		&i.CiUrl,
+		&i.IdempotencyKey,
+		&i.DiffRef,
+		&i.RequestedAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.ClaimedBy,
+		&i.ClaimedAt,
+	)
+	return i, err
+}
+
+const resolveRunExternalRef = `-- name: ResolveRunExternalRef :one
+UPDATE runs
+SET ci_external_ref = $1, ci_url = $2
+WHERE id = $3 AND ci_external_ref IS NULL
+RETURNING id, tenant_id, actor_id, environment_id, binding_id, pipeline_id, tier, status, ci_provider, ci_external_ref, ci_raw_status, ci_url, idempotency_key, diff_ref, requested_at, started_at, finished_at, created_at, claimed_by, claimed_at
+`
+
+type ResolveRunExternalRefParams struct {
+	CiExternalRef sql.NullString `json:"ci_external_ref"`
+	CiUrl         sql.NullString `json:"ci_url"`
+	ID            uuid.UUID      `json:"id"`
+}
+
+func (q *Queries) ResolveRunExternalRef(ctx context.Context, arg ResolveRunExternalRefParams) (Run, error) {
+	row := q.db.QueryRowContext(ctx, resolveRunExternalRef, arg.CiExternalRef, arg.CiUrl, arg.ID)
+	var i Run
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ActorID,
+		&i.EnvironmentID,
+		&i.BindingID,
+		&i.PipelineID,
+		&i.Tier,
+		&i.Status,
+		&i.CiProvider,
+		&i.CiExternalRef,
+		&i.CiRawStatus,
+		&i.CiUrl,
+		&i.IdempotencyKey,
+		&i.DiffRef,
+		&i.RequestedAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.ClaimedBy,
+		&i.ClaimedAt,
 	)
 	return i, err
 }
@@ -174,7 +393,7 @@ SET status = $1::text,
     started_at = CASE WHEN $1::text = 'executing' AND started_at IS NULL THEN now() ELSE started_at END,
     finished_at = CASE WHEN $1::text IN ('succeeded', 'failed', 'cancelled', 'timed_out') THEN now() ELSE finished_at END
 WHERE id = $2 AND status = $3
-RETURNING id, tenant_id, actor_id, environment_id, binding_id, pipeline_id, tier, status, ci_provider, ci_external_ref, ci_raw_status, ci_url, idempotency_key, diff_ref, requested_at, started_at, finished_at, created_at
+RETURNING id, tenant_id, actor_id, environment_id, binding_id, pipeline_id, tier, status, ci_provider, ci_external_ref, ci_raw_status, ci_url, idempotency_key, diff_ref, requested_at, started_at, finished_at, created_at, claimed_by, claimed_at
 `
 
 type UpdateRunStatusParams struct {
@@ -205,6 +424,8 @@ func (q *Queries) UpdateRunStatus(ctx context.Context, arg UpdateRunStatusParams
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.CreatedAt,
+		&i.ClaimedBy,
+		&i.ClaimedAt,
 	)
 	return i, err
 }

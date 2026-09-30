@@ -28,6 +28,7 @@ import (
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/session"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/signingkey"
 	"github.com/rhysmcneill/agentic-idp/pkg/ci"
+	"github.com/rhysmcneill/agentic-idp/pkg/ci/githubactions"
 	"github.com/rhysmcneill/agentic-idp/pkg/identity"
 )
 
@@ -140,10 +141,10 @@ func Run(parent context.Context, getenv func(string) string) error {
 	}
 	defer pool.Close()
 
-	// No adapter registered in this PR: the GitHub Actions adapter is a
-	// separate follow-up (see Decision 023) — a run that reaches executing
-	// fails closed to failed rather than dispatching, by design.
-	adapters := ci.NewRegistry()
+	// The control plane only resolves a provider here to pass Worker.Work's
+	// fail-closed check — it never calls Trigger/Status/Cancel. The worker
+	// constructs its own instance to actually drive GitHub.
+	adapters := ci.NewRegistry(githubactions.New())
 	pipelines := pipeline.NewStore(conn)
 	runs, riverClient, err := execution.NewQueueClient(conn, pipelines, adapters, pool, riverMaxWorkers)
 	if err != nil {

@@ -36,7 +36,7 @@ Numbered, append-only. Each records what was decided and *why*, so the reasoning
 
 ### 004 — Pipelines fetch tier-scoped credentials via a CI OIDC callback
 
-**Decision.** Triggered pipelines must not use their own static OIDC role. They call back with their CI OIDC token; the control plane verifies it, matches the correlation ID to the approved run, and brokers credentials scoped to the *triggering actor's* tier. It fails closed.
+**Decision.** Triggered pipelines must not use their own static OIDC role. They call back with their CI OIDC token; the worker (never the control plane, which holds no cloud credentials) verifies it, matches its verified claims to the approved run, and brokers credentials scoped to the *triggering actor's* tier. It fails closed.
 
 **Why.** Without this, an agent triggering a pipeline inherits that pipeline's typically-broad permissions regardless of its trust tier — the governance model leaks entirely at the CI boundary and every other guarantee becomes decorative.
 
@@ -215,11 +215,11 @@ The worker's actual trust question is flatter and narrower: "is this the registe
 
 ### 021 — The worker supports self-hosted and SaaS CI as equally first-class placements
 
-**Decision.** The worker's OIDC-callback listener (`internal/ciauth`, Phase 1) must work whether the customer's CI runs self-hosted (their own runner fleet) or as a SaaS/cloud-hosted provider (GitHub-hosted runners, Bitbucket Cloud Pipelines). Neither is the default case with the other bolted on afterward, and a single customer may run both at once against the same control plane.
+**Decision.** The worker's OIDC-callback listener (`worker/internal/ciauth`, Phase 1) must work whether the customer's CI runs self-hosted (their own runner fleet) or as a SaaS/cloud-hosted provider (GitHub-hosted runners, Bitbucket Cloud Pipelines). Neither is the default case with the other bolted on afterward, and a single customer may run both at once against the same control plane.
 
-**Why.** Self-hosted CI can share a private network with the worker, so the callback stays internal — this is the case the existing docs describe. But most customers, and certainly the larger ones, run CI on the provider's own infrastructure, where there is no private network for the worker to be "inside" of. Designing only for the self-hosted case would silently exclude the common case; treating SaaS CI as a variant to retrofit later risks baking network-locality assumptions into `internal/ciauth`'s first implementation that are expensive to unwind.
+**Why.** Self-hosted CI can share a private network with the worker, so the callback stays internal — this is the case the existing docs describe. But most customers, and certainly the larger ones, run CI on the provider's own infrastructure, where there is no private network for the worker to be "inside" of. Designing only for the self-hosted case would silently exclude the common case; treating SaaS CI as a variant to retrofit later risks baking network-locality assumptions into `worker/internal/ciauth`'s first implementation that are expensive to unwind.
 
-**Consequence.** Under self-hosted CI, the callback boundary stays an internal one, as already documented. Under SaaS CI, the same callback endpoint must be externally reachable — a public-facing boundary, terminated over TLS, with the same trust assumption as any other public webhook receiver (Codecov, Snyk) rather than a different one. This is a placement and design requirement to build `internal/ciauth` against from the start in Phase 1; it does not itself implement the callback, which remains unbuilt (`internal/ciauth` is currently a `.gitkeep` stub).
+**Consequence.** Under self-hosted CI, the callback boundary stays an internal one, as already documented. Under SaaS CI, the same callback endpoint must be externally reachable — a public-facing boundary, terminated over TLS, with the same trust assumption as any other public webhook receiver (Codecov, Snyk) rather than a different one. Built in Phase 1 exactly this way — see [ARCHITECTURE.md](ARCHITECTURE.md)'s "CI OIDC callback" and [CI-INTEGRATION.md](CI-INTEGRATION.md).
 
 ---
 
