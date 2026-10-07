@@ -132,3 +132,25 @@ sql:
         emit_json_tags: true
         emit_interface: true
         emit_exact_table_names: false
+  - schema: "controlplane/migrations/*.up.sql"
+    queries: "controlplane/internal/cost/queries"
+    engine: "postgresql"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "controlplane/internal/cost/sqlcgen"
+        sql_package: "database/sql"
+        emit_json_tags: true
+        emit_interface: true
+        emit_exact_table_names: false
+  - schema: "controlplane/migrations/*.up.sql"
+    queries: "controlplane/internal/telemetry/queries"
+    engine: "postgresql"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "controlplane/internal/telemetry/sqlcgen"
+        sql_package: "database/sql"
+        emit_json_tags: true
+        emit_interface: true
+        emit_exact_table_names: false

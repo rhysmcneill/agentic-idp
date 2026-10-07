@@ -27,6 +27,8 @@ import (
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/pipeline"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/session"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/signingkey"
+	"github.com/rhysmcneill/agentic-idp/controlplane/internal/telemetry"
+	"github.com/rhysmcneill/agentic-idp/controlplane/internal/tenant"
 	"github.com/rhysmcneill/agentic-idp/pkg/ci"
 	"github.com/rhysmcneill/agentic-idp/pkg/ci/githubactions"
 	"github.com/rhysmcneill/agentic-idp/pkg/identity"
@@ -45,6 +47,8 @@ type config struct {
 	databaseURL          string
 	listenAddr           string
 	workerBootstrapToken string
+	telemetryEndpointURL string
+	productVersion       string
 }
 
 // loadConfig takes getenv explicitly (rather than calling os.Getenv itself)
@@ -69,6 +73,9 @@ func loadConfig(getenv func(string) string) (config, error) {
 		return config{}, err
 	}
 	cfg.workerBootstrapToken = token
+
+	cfg.telemetryEndpointURL = getenv("TELEMETRY_ENDPOINT_URL")
+	cfg.productVersion = getenv("PRODUCT_VERSION")
 
 	return cfg, nil
 }
@@ -157,6 +164,11 @@ func Run(parent context.Context, getenv func(string) string) error {
 	srv.EnableExecution(runs)
 
 	go pruneExpiredSessions(ctx, conn)
+
+	// Both the env var and the tenant's own opt-in flag must be set for
+	// anything to send — see telemetry.Sender.Run.
+	sender := telemetry.NewSender(cfg.telemetryEndpointURL, cfg.productVersion, conn, tenant.NewStore(conn))
+	go sender.Run(ctx)
 
 	httpServer := &http.Server{
 		Addr:              cfg.listenAddr,

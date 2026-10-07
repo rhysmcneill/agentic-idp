@@ -15,6 +15,7 @@ type Querier interface {
 	CreateTenant(ctx context.Context, name string) (Tenant, error)
 	GetSoleTenant(ctx context.Context) (Tenant, error)
 	GetTenant(ctx context.Context, id uuid.UUID) (Tenant, error)
+	SetTenantTelemetry(ctx context.Context, arg SetTenantTelemetryParams) (Tenant, error)
 }
 
 var _ Querier = (*Queries)(nil)

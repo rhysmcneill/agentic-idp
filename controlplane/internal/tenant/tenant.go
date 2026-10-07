@@ -19,9 +19,10 @@ var ErrNotFound = errors.New("tenant: not found")
 
 // Tenant is the root of every other tenant-scoped table.
 type Tenant struct {
-	ID        uuid.UUID
-	Name      string
-	CreatedAt time.Time
+	ID               uuid.UUID
+	Name             string
+	TelemetryEnabled bool
+	CreatedAt        time.Time
 }
 
 // Store is a Postgres-backed tenant repository.
@@ -35,7 +36,8 @@ func NewStore(db sqlcgen.DBTX) *Store {
 	return &Store{q: sqlcgen.New(db)}
 }
 
-// Create inserts a new tenant with the given name and returns the stored row.
+// Create inserts a new tenant with the given name (telemetry defaults to
+// disabled — see SetTelemetry) and returns the stored row.
 func (s *Store) Create(ctx context.Context, name string) (Tenant, error) {
 	if name == "" {
 		return Tenant{}, fmt.Errorf("tenant: create: name is required")
@@ -44,6 +46,18 @@ func (s *Store) Create(ctx context.Context, name string) (Tenant, error) {
 	row, err := s.q.CreateTenant(ctx, name)
 	if err != nil {
 		return Tenant{}, fmt.Errorf("tenant: create: %w", err)
+	}
+	return fromRow(row), nil
+}
+
+// SetTelemetry updates whether id has opted in to anonymous usage telemetry.
+func (s *Store) SetTelemetry(ctx context.Context, id uuid.UUID, enabled bool) (Tenant, error) {
+	row, err := s.q.SetTenantTelemetry(ctx, sqlcgen.SetTenantTelemetryParams{ID: id, TelemetryEnabled: enabled})
+	if errors.Is(err, sql.ErrNoRows) {
+		return Tenant{}, ErrNotFound
+	}
+	if err != nil {
+		return Tenant{}, fmt.Errorf("tenant: set telemetry: %w", err)
 	}
 	return fromRow(row), nil
 }
@@ -84,5 +98,5 @@ func (s *Store) GetSole(ctx context.Context) (Tenant, error) {
 }
 
 func fromRow(row sqlcgen.Tenant) Tenant {
-	return Tenant{ID: row.ID, Name: row.Name, CreatedAt: row.CreatedAt}
+	return Tenant{ID: row.ID, Name: row.Name, TelemetryEnabled: row.TelemetryEnabled, CreatedAt: row.CreatedAt}
 }

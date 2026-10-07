@@ -104,6 +104,16 @@ type AuditEvent struct {
 	Metadata      json.RawMessage `json:"metadata"`
 }
 
+type CostRate struct {
+	ID              uuid.UUID      `json:"id"`
+	TenantID        uuid.UUID      `json:"tenant_id"`
+	EnvironmentID   uuid.NullUUID  `json:"environment_id"`
+	CiProvider      sql.NullString `json:"ci_provider"`
+	RateMicrosPerMs int64          `json:"rate_micros_per_ms"`
+	Currency        string         `json:"currency"`
+	CreatedAt       time.Time      `json:"created_at"`
+}
+
 type Environment struct {
 	ID        uuid.UUID `json:"id"`
 	TenantID  uuid.UUID `json:"tenant_id"`
@@ -236,6 +246,16 @@ type Run struct {
 	ClaimedAt      sql.NullTime   `json:"claimed_at"`
 }
 
+type RunCost struct {
+	ID           uuid.UUID     `json:"id"`
+	RunID        uuid.UUID     `json:"run_id"`
+	Source       string        `json:"source"`
+	DurationMs   sql.NullInt64 `json:"duration_ms"`
+	AmountMicros sql.NullInt64 `json:"amount_micros"`
+	Currency     string        `json:"currency"`
+	CapturedAt   time.Time     `json:"captured_at"`
+}
+
 type SigningKey struct {
 	ID         bool      `json:"id"`
 	PrivateKey []byte    `json:"private_key"`
@@ -249,10 +269,17 @@ type Team struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-type Tenant struct {
+type TelemetryInstance struct {
 	ID        uuid.UUID `json:"id"`
-	Name      string    `json:"name"`
+	Singleton bool      `json:"singleton"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type Tenant struct {
+	ID               uuid.UUID `json:"id"`
+	Name             string    `json:"name"`
+	CreatedAt        time.Time `json:"created_at"`
+	TelemetryEnabled bool      `json:"telemetry_enabled"`
 }
 
 type WorkerCredential struct {

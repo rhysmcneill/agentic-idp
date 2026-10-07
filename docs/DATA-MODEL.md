@@ -62,6 +62,7 @@ erDiagram
 |---|---|---|
 | `id` | `uuid` PK | |
 | `name` | `text` NOT NULL | |
+| `telemetry_enabled` | `boolean` NOT NULL DEFAULT `false` *(Phase 1)* | opt-in, never defaults on |
 | `created_at` | `timestamptz` NOT NULL DEFAULT `now()` | |
 
 The root of every other table. Present from commit one even though v1 ships self-hosted single-tenant — see [Decision 001](DECISIONS.md).
@@ -288,15 +289,37 @@ Every credential mint is an audited event, not a separate table — [ARCHITECTUR
 
 ### `run_costs` *(Phase 1)*
 
+A governance/attribution signal ("agent X, tier Y, cost $Z"), not a reconciled cloud bill. One row per run per `source` — `ci_duration` is captured automatically from the run's own `started_at`/`finished_at`; `agent_reported` is reserved schema room for a future self-reported agent token/LLM cost, not yet written by any code.
+
 | Column | Type | Notes |
 |---|---|---|
 | `id` | `uuid` PK | |
 | `run_id` | `uuid` NOT NULL REFERENCES `runs` | |
-| `amount_micros` | `bigint` NOT NULL | cost in micro-units of `currency`, avoiding float rounding on money |
+| `source` | `text` NOT NULL CHECK IN (`ci_duration`, `agent_reported`) | |
+| `duration_ms` | `bigint` NULL | wall-clock duration this row attributes; null for a non-duration-based source |
+| `amount_micros` | `bigint` NULL | cost in micro-units of `currency`, avoiding float rounding; null when no `cost_rates` row matches (duration-only row) |
 | `currency` | `text` NOT NULL DEFAULT `USD` | |
 | `captured_at` | `timestamptz` NOT NULL DEFAULT `now()` | |
 
 Per-run cost capture, rolling up per actor in the Phase 3b cost views — the rollup itself is a query over this table (`GROUP BY actor_id` via `runs`), not a separately maintained aggregate table.
+
+### `cost_rates` *(Phase 1)*
+
+An operator-declared rate — currency per unit of CI run time (e.g. "$0.008/minute"), never discovered or fetched automatically, since it depends on the operator's own CI plan or self-hosted infra cost. Scoped per tenant, optionally narrowed to one environment and/or one CI provider; the most specific matching row wins, and no match means no rate configured.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` PK | |
+| `tenant_id` | `uuid` NOT NULL REFERENCES `tenants` | |
+| `environment_id` | `uuid` NULL REFERENCES `environments` | narrows the rate to one environment |
+| `ci_provider` | `text` NULL | narrows the rate to one CI provider |
+| `rate_micros_per_ms` | `bigint` NOT NULL | currency per millisecond of CI run time, in micro-units |
+| `currency` | `text` NOT NULL DEFAULT `USD` | |
+| `created_at` | `timestamptz` NOT NULL DEFAULT `now()` | |
+
+### `telemetry_instance` *(Phase 1)*
+
+A singleton table holding one random identifier per deployment, used only in opt-in telemetry payloads — deliberately distinct from `tenant_id`, generated once the same way `signingkey` persists the token-signing key.
 
 ## Session and revocation
 

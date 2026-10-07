@@ -41,9 +41,10 @@ func handleGetSetup(tenants *tenant.Store) http.Handler {
 }
 
 type setupRequest struct {
-	TenantName    string `json:"tenant_name"`
-	AdminUsername string `json:"admin_username"`
-	AdminPassword string `json:"admin_password"`
+	TenantName       string `json:"tenant_name"`
+	AdminUsername    string `json:"admin_username"`
+	AdminPassword    string `json:"admin_password"`
+	TelemetryEnabled bool   `json:"telemetry_enabled"`
 }
 
 type setupResponse struct {
@@ -117,6 +118,13 @@ func handlePostSetup(db *sql.DB, tenants *tenant.Store, issuer *identity.Issuer)
 			writeInternalError(w, err)
 			return
 		}
+		if req.TelemetryEnabled {
+			newTenant, err = txTenants.SetTelemetry(ctx, newTenant.ID, true)
+			if err != nil {
+				writeInternalError(w, err)
+				return
+			}
+		}
 
 		newTeam, err := txTeams.Create(ctx, newTenant.ID, defaultTeamName)
 		if err != nil {
@@ -150,6 +158,16 @@ func handlePostSetup(db *sql.DB, tenants *tenant.Store, issuer *identity.Issuer)
 		}); err != nil {
 			writeInternalError(w, err)
 			return
+		}
+		if req.TelemetryEnabled {
+			if _, err := txAudits.Create(ctx, audit.CreateParams{
+				TenantID: newTenant.ID,
+				ActorID:  newActor.ID,
+				Action:   "telemetry.toggled",
+			}); err != nil {
+				writeInternalError(w, err)
+				return
+			}
 		}
 
 		if err := tx.Commit(); err != nil {

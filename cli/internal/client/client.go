@@ -67,9 +67,10 @@ func (c *Client) GetCICallbackURL(ctx context.Context, provider, repo string) (s
 
 // SetupRequest is POST /v1/setup's request body.
 type SetupRequest struct {
-	TenantName    string `json:"tenant_name"`
-	AdminUsername string `json:"admin_username"`
-	AdminPassword string `json:"admin_password"`
+	TenantName       string `json:"tenant_name"`
+	AdminUsername    string `json:"admin_username"`
+	AdminPassword    string `json:"admin_password"`
+	TelemetryEnabled bool   `json:"telemetry_enabled"`
 }
 
 // SetupResponse is POST /v1/setup's response body.
@@ -263,6 +264,89 @@ func (c *Client) GetVerification(ctx context.Context, token, environmentName, ve
 		return GetVerificationResponse{}, err
 	}
 	return resp, nil
+}
+
+// setTelemetryRequest is PATCH /v1/tenants/telemetry's request body.
+type setTelemetryRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// SetTelemetry toggles the caller's tenant's opt-in telemetry flag,
+// authenticated as token.
+func (c *Client) SetTelemetry(ctx context.Context, token string, enabled bool) error {
+	return c.do(ctx, http.MethodPatch, "/v1/tenants/telemetry", token, setTelemetryRequest{Enabled: enabled}, nil)
+}
+
+// RunCost is one entry in GET /v1/runs/{id}/cost's response body.
+type RunCost struct {
+	Source       string `json:"source"`
+	DurationMS   *int64 `json:"duration_ms,omitempty"`
+	AmountMicros *int64 `json:"amount_micros,omitempty"`
+	Currency     string `json:"currency"`
+	CapturedAt   string `json:"captured_at"`
+}
+
+// GetRunCost returns every cost row captured against a run, authenticated as token.
+func (c *Client) GetRunCost(ctx context.Context, token, runID string) ([]RunCost, error) {
+	var resp []RunCost
+	if err := c.do(ctx, http.MethodGet, "/v1/runs/"+runID+"/cost", token, nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// ActorCostSummary is one entry in GET /v1/costs/by-actor's response body.
+type ActorCostSummary struct {
+	ActorID           string `json:"actor_id"`
+	TotalAmountMicros *int64 `json:"total_amount_micros,omitempty"`
+	TotalDurationMS   int64  `json:"total_duration_ms"`
+	RunCount          int64  `json:"run_count"`
+}
+
+// GetCostsByActorParams narrows the by-actor rollup. Zero values mean
+// unfiltered.
+type GetCostsByActorParams struct {
+	ActorID string
+	From    string // RFC3339, or empty
+	To      string // RFC3339, or empty
+}
+
+// GetCostsByActor returns the cost-per-actor rollup, authenticated as token.
+func (c *Client) GetCostsByActor(ctx context.Context, token string, params GetCostsByActorParams) ([]ActorCostSummary, error) {
+	q := url.Values{}
+	if params.ActorID != "" {
+		q.Set("actor_id", params.ActorID)
+	}
+	if params.From != "" {
+		q.Set("from", params.From)
+	}
+	if params.To != "" {
+		q.Set("to", params.To)
+	}
+	path := "/v1/costs/by-actor"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+
+	var resp []ActorCostSummary
+	if err := c.do(ctx, http.MethodGet, path, token, nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// SetCostRateRequest is PUT /v1/cost-rates' request body.
+type SetCostRateRequest struct {
+	EnvironmentID   string `json:"environment_id,omitempty"`
+	CIProvider      string `json:"ci_provider,omitempty"`
+	RateMicrosPerMS int64  `json:"rate_micros_per_ms"`
+	Currency        string `json:"currency,omitempty"`
+}
+
+// SetCostRate sets the operator-declared CI-duration-to-cost rate for a
+// scope, authenticated as token.
+func (c *Client) SetCostRate(ctx context.Context, token string, req SetCostRateRequest) error {
+	return c.do(ctx, http.MethodPut, "/v1/cost-rates", token, req, nil)
 }
 
 func (c *Client) do(ctx context.Context, method, path, token string, body, out any) error {
