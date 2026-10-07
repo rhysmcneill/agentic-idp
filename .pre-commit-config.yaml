@@ -7,7 +7,9 @@
 # Vendored/managed files (e.g. Claude Code skill bundles) aren't ours to
 # reformat — pre-commit-hooks' whitespace fixers have no file-type filter and
 # will otherwise rewrite them, breaking the skill's own integrity checks.
-exclude: '^\.claude/skills/'
+# Also gitignored (see .gitignore) so they're never staged in the first
+# place, but excluded here too in case a hook is ever run against them directly.
+exclude: '^(\.claude/skills/|\.github/skills/|\.github/agents/|\.github/hooks/)'
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks

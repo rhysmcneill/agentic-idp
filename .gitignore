@@ -38,6 +38,12 @@ credentials
 
 # OS
 .DS_Store
+
+# Impeccable skill install (binaries, fonts, scripts) — tooling, not project source
+.claude/skills/
+.github/skills/
+.github/agents/
+.github/hooks/
 Thumbs.db
 
 # Frontend (from Phase 3)

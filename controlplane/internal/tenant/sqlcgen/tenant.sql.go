@@ -23,34 +23,70 @@ func (q *Queries) AnyTenantExists(ctx context.Context) (bool, error) {
 }
 
 const createTenant = `-- name: CreateTenant :one
-INSERT INTO tenants (name) VALUES ($1) RETURNING id, name, created_at
+INSERT INTO tenants (name) VALUES ($1) RETURNING id, name, created_at, telemetry_enabled
 `
 
 func (q *Queries) CreateTenant(ctx context.Context, name string) (Tenant, error) {
 	row := q.db.QueryRowContext(ctx, createTenant, name)
 	var i Tenant
-	err := row.Scan(&i.ID, &i.Name, &i.CreatedAt)
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.CreatedAt,
+		&i.TelemetryEnabled,
+	)
 	return i, err
 }
 
 const getSoleTenant = `-- name: GetSoleTenant :one
-SELECT id, name, created_at FROM tenants LIMIT 1
+SELECT id, name, created_at, telemetry_enabled FROM tenants LIMIT 1
 `
 
 func (q *Queries) GetSoleTenant(ctx context.Context) (Tenant, error) {
 	row := q.db.QueryRowContext(ctx, getSoleTenant)
 	var i Tenant
-	err := row.Scan(&i.ID, &i.Name, &i.CreatedAt)
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.CreatedAt,
+		&i.TelemetryEnabled,
+	)
 	return i, err
 }
 
 const getTenant = `-- name: GetTenant :one
-SELECT id, name, created_at FROM tenants WHERE id = $1
+SELECT id, name, created_at, telemetry_enabled FROM tenants WHERE id = $1
 `
 
 func (q *Queries) GetTenant(ctx context.Context, id uuid.UUID) (Tenant, error) {
 	row := q.db.QueryRowContext(ctx, getTenant, id)
 	var i Tenant
-	err := row.Scan(&i.ID, &i.Name, &i.CreatedAt)
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.CreatedAt,
+		&i.TelemetryEnabled,
+	)
+	return i, err
+}
+
+const setTenantTelemetry = `-- name: SetTenantTelemetry :one
+UPDATE tenants SET telemetry_enabled = $2 WHERE id = $1 RETURNING id, name, created_at, telemetry_enabled
+`
+
+type SetTenantTelemetryParams struct {
+	ID               uuid.UUID `json:"id"`
+	TelemetryEnabled bool      `json:"telemetry_enabled"`
+}
+
+func (q *Queries) SetTenantTelemetry(ctx context.Context, arg SetTenantTelemetryParams) (Tenant, error) {
+	row := q.db.QueryRowContext(ctx, setTenantTelemetry, arg.ID, arg.TelemetryEnabled)
+	var i Tenant
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.CreatedAt,
+		&i.TelemetryEnabled,
+	)
 	return i, err
 }

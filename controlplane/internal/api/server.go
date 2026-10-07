@@ -7,6 +7,7 @@ import (
 
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/actor"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/audit"
+	"github.com/rhysmcneill/agentic-idp/controlplane/internal/cost"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/credential"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/environment"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/execution"
@@ -36,6 +37,7 @@ type Server struct {
 	workers       *workercred.Store
 	verifications *verification.Store
 	pipelines     *pipeline.Store
+	costs         *cost.Store
 
 	issuer   *identity.Issuer
 	verifier *identity.Verifier
@@ -67,6 +69,7 @@ func NewServer(db *sql.DB, issuer *identity.Issuer, verifier *identity.Verifier)
 		workers:       workercred.NewStore(db),
 		verifications: verification.NewStore(db),
 		pipelines:     pipeline.NewStore(db),
+		costs:         cost.NewStore(db),
 		issuer:        issuer,
 		verifier:      verifier,
 	}
@@ -123,6 +126,8 @@ func (s *Server) Routes() http.Handler {
 		handlePostPipelines(s.environments, s.pipelines)))
 	mux.Handle("GET /v1/pipelines/{id}", requireAuth(s.verifier, s.sessions,
 		handleGetPipeline(s.pipelines)))
+	mux.Handle("PATCH /v1/tenants/telemetry", requireAuth(s.verifier, s.sessions,
+		handlePatchTenantTelemetry(s.tenants, s.audits)))
 	if s.runs != nil {
 		mux.Handle("POST /v1/runs", requireAuth(s.verifier, s.sessions,
 			handlePostRuns(s.environments, s.runs, s.audits)))
@@ -133,9 +138,15 @@ func (s *Server) Routes() http.Handler {
 		mux.Handle("GET /v1/worker/runs/next", requireWorkerAuth(s.workers,
 			handleGetNextWorkerRun(s.runs, s.pipelines)))
 		mux.Handle("POST /v1/worker/runs/{id}/result", requireWorkerAuth(s.workers,
-			handlePostWorkerRunResult(s.runs)))
+			handlePostWorkerRunResult(s.runs, s.costs)))
 		mux.Handle("POST /v1/worker/runs/resolve", requireWorkerAuth(s.workers,
 			handlePostWorkerRunResolve(s.runs, s.pipelines, s.environments, s.audits)))
+		mux.Handle("GET /v1/runs/{id}/cost", requireAuth(s.verifier, s.sessions,
+			handleGetRunCost(s.runs, s.costs)))
+		mux.Handle("GET /v1/costs/by-actor", requireAuth(s.verifier, s.sessions,
+			handleGetCostsByActor(s.costs)))
+		mux.Handle("PUT /v1/cost-rates", requireAuth(s.verifier, s.sessions,
+			handlePutCostRate(s.costs)))
 	}
 	return mux
 }

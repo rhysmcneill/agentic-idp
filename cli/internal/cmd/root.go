@@ -20,5 +20,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newPipelineCmd())
 	root.AddCommand(newRunCmd())
 	root.AddCommand(newCICmd())
+	root.AddCommand(newTelemetryCmd())
+	root.AddCommand(newCostCmd())
 	return root
 }

@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/google/uuid"
 
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/audit"
+	"github.com/rhysmcneill/agentic-idp/controlplane/internal/cost"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/environment"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/execution"
 	"github.com/rhysmcneill/agentic-idp/controlplane/internal/pipeline"
@@ -322,7 +324,7 @@ var validTerminalRunStatuses = map[string]bool{
 // Only the worker credential that claimed it may report a result —
 // runs.ReportResult enforces that at the query level, so a stolen credential
 // for one worker can't forge results for runs another worker claimed.
-func handlePostWorkerRunResult(runs *execution.Store) http.Handler {
+func handlePostWorkerRunResult(runs *execution.Store, costs *cost.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cred, ok := workerCredentialFromContext(r.Context())
 		if !ok {
@@ -359,6 +361,15 @@ func handlePostWorkerRunResult(runs *execution.Store) http.Handler {
 		if err != nil {
 			writeInternalError(w, err)
 			return
+		}
+
+		if run.StartedAt != nil {
+			if _, err := costs.CaptureCIDuration(r.Context(), run.TenantID, run.ID, run.EnvironmentID, run.CIProvider, *run.StartedAt, *run.FinishedAt); err != nil {
+				// Not load-bearing for the run's own state machine — an
+				// attribution signal failing to write shouldn't fail the
+				// worker's result report.
+				slog.Error("cost: capturing ci duration", "run_id", run.ID, "error", err)
+			}
 		}
 
 		writeJSON(w, http.StatusOK, runToResponse(run))

@@ -19,19 +19,28 @@ const defaultServer = "http://localhost:8080"
 
 func newSetupCmd() *cobra.Command {
 	var server string
+	var telemetry bool
 
 	cmd := &cobra.Command{
 		Use:   "setup",
 		Short: "Run first-run setup on a fresh instance",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runSetup(cmd.Context(), server)
+			// telemetryFlag is nil when --telemetry wasn't passed at all, so
+			// runSetup knows to prompt for it instead of silently defaulting
+			// to the flag's zero value (false).
+			var telemetryFlag *bool
+			if cmd.Flags().Changed("telemetry") {
+				telemetryFlag = &telemetry
+			}
+			return runSetup(cmd.Context(), server, telemetryFlag)
 		},
 	}
 	cmd.Flags().StringVar(&server, "server", defaultServer, "control plane URL")
+	cmd.Flags().BoolVar(&telemetry, "telemetry", false, "opt in to anonymous usage telemetry (aggregate counts only, sent daily if enabled). If not passed, you will be prompted.")
 	return cmd
 }
 
-func runSetup(ctx context.Context, server string) error {
+func runSetup(ctx context.Context, server string, telemetryFlag *bool) error {
 	c := client.New(server)
 
 	needsSetup, err := c.NeedsSetup(ctx)
@@ -63,10 +72,22 @@ func runSetup(ctx context.Context, server string) error {
 		return errors.New("passwords did not match")
 	}
 
+	telemetry := false
+	if telemetryFlag != nil {
+		telemetry = *telemetryFlag
+	} else {
+		answer, err := prompt(stdin, "Enable anonymous usage telemetry? [y/N]: ")
+		if err != nil {
+			return err
+		}
+		telemetry = strings.EqualFold(answer, "y") || strings.EqualFold(answer, "yes")
+	}
+
 	resp, err := c.Setup(ctx, client.SetupRequest{
-		TenantName:    tenantName,
-		AdminUsername: adminUsername,
-		AdminPassword: password,
+		TenantName:       tenantName,
+		AdminUsername:    adminUsername,
+		AdminPassword:    password,
+		TelemetryEnabled: telemetry,
 	})
 	if err != nil {
 		return fmt.Errorf("running setup: %w", err)
