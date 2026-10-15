@@ -1,0 +1,36 @@
+# Runs only on the "renovate" cron trigger (repo activation + this cron are
+# managed via Tofu — see terramate-homelab-stacks/stacks/production/woodpecker
+# and homelab-docs/services/woodpecker.md) — never on push. App ID/installation
+# ID/private key are Woodpecker global secrets (one GitHub App installed on
+# the whole account), so onboarding a new repo to Renovate needs no new
+# secrets here, just this file plus a `woodpecker_repositories` entry.
+#
+# This repo's own CI (.github/workflows/ci.yml) is unrelated and untouched —
+# only Dependabot was replaced here, not the build/test/lint/e2e pipeline.
+when:
+  - event: cron
+    cron: renovate
+
+steps:
+  - name: mint-github-app-token
+    image: ghcr.io/mshekow/github-app-installation-token:2026.07.26@sha256:9c818c32d25be97ff940b8ee0ee5a85b620ef618dfcbe73ad5b64fda81a0a541
+    commands:
+      - echo "$RENOVATE_GITHUB_APP_PRIVATE_KEY" > /tmp/renovate-app-key.pem
+      - node index.js "$RENOVATE_GITHUB_APP_ID" "$RENOVATE_GITHUB_APP_INSTALLATION_ID" /tmp/renovate-app-key.pem > .renovate-token
+    environment:
+      RENOVATE_GITHUB_APP_ID:
+        from_secret: renovate_github_app_id # pragma: allowlist secret
+      RENOVATE_GITHUB_APP_INSTALLATION_ID:
+        from_secret: renovate_github_app_installation_id # pragma: allowlist secret
+      RENOVATE_GITHUB_APP_PRIVATE_KEY:
+        from_secret: renovate_github_app_private_key # pragma: allowlist secret
+
+  - name: renovate
+    image: renovate/renovate:44.152.0-full@sha256:4204dfa0f9aa5b42ca53933d974698e30dd86c08c1ed7cf6c2f769820c2094c6
+    commands:
+      - export RENOVATE_TOKEN=$(cat .renovate-token)
+      - renovate
+    environment:
+      RENOVATE_PLATFORM: github
+      RENOVATE_REPOSITORIES: rhysmcneill/agentic-idp
+      RENOVATE_AUTODISCOVER: "false"
