@@ -84,3 +84,35 @@ jobs:
 
       - name: Run e2e
         run: make e2e
+
+  helm:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    if: github.repository == 'rhysmcneill/agentic-idp'
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+
+      - name: Lint
+        run: make helm-lint
+
+      - name: Render
+        run: make helm-template
+
+  cli-dist:
+    name: idpctl cross-build
+    runs-on: ubuntu-latest
+    if: github.repository == 'rhysmcneill/agentic-idp'
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build every release target
+        run: make cli-dist CLI_VERSION=0.0.0-ci

@@ -1,6 +1,6 @@
 # commitlint config for agentic-idp. Used by the commitlint pre-commit hook
 # (see .pre-commit-config.yaml) to enforce conventional commits, per
-# CLAUDE.md's "Git & commits" — groundwork for semantic-release in Phase 1.
+# CLAUDE.md's "Git & commits" — the input release-please reads in Phase 1.
 
 extends:
   - "@commitlint/config-conventional"
