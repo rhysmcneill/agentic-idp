@@ -1,0 +1,123 @@
+{{- if .Values.worker.enabled }}
+{{- if and .Values.worker.github.appId (not .Values.worker.ciCallbackUrl) }}
+{{- fail "worker.ciCallbackUrl is required when worker.github.appId is set" }}
+{{- end }}
+{{- if and .Values.worker.github.appId (not .Values.worker.github.privateKeySecret.name) }}
+{{- fail "worker.github.privateKeySecret.name is required when worker.github.appId is set" }}
+{{- end }}
+{{- $github := .Values.worker.github.appId }}
+{{- if .Values.worker.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "idp.worker.serviceAccountName" . }}
+  labels: {{- include "idp.labels" . | nindent 4 }}
+  {{- with .Values.worker.serviceAccount.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "idp.fullname" . }}-worker
+  labels: {{- include "idp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  # One replica, replaced rather than rolled: each bootstrap call rotates that worker name's
+  # credential, so a second pod with the same name would invalidate the first.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {{- include "idp.selector" (dict "Chart" .Chart "Release" .Release "component" "worker") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "idp.selector" (dict "Chart" .Chart "Release" .Release "component" "worker") | nindent 8 }}
+      annotations:
+        {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{ end }}
+    spec:
+      serviceAccountName: {{ include "idp.worker.serviceAccountName" . }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: {{ include "idp.image" (dict "root" . "cfg" .Values.worker) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- include "idp.securityContext" . | nindent 12 }}
+          env:
+            - name: IDP_CONTROL_PLANE_URL
+              value: {{ default (printf "http://%s-controlplane:%v" (include "idp.fullname" .) .Values.controlplane.service.port) .Values.worker.controlPlaneUrl | quote }}
+            - name: IDP_WORKER_NAME
+              value: {{ default (printf "%s-worker" (include "idp.fullname" .)) .Values.worker.name | quote }}
+            - name: IDP_WORKER_BOOTSTRAP_TOKEN_FILE
+              value: /secrets/bootstrap/{{ .Values.bootstrapToken.existingSecretKey }}
+            {{- with .Values.worker.pollInterval }}
+            - name: IDP_POLL_INTERVAL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if $github }}
+            - name: IDP_GITHUB_APP_ID
+              value: {{ $github | quote }}
+            - name: IDP_GITHUB_APP_PRIVATE_KEY_FILE
+              value: /secrets/github/{{ .Values.worker.github.privateKeySecret.key }}
+            - name: IDP_CI_CALLBACK_URL
+              value: {{ .Values.worker.ciCallbackUrl | quote }}
+            - name: IDP_CI_LISTEN_ADDR
+              value: {{ printf ":%v" .Values.worker.ciListenPort | quote }}
+            {{- end }}
+          {{- if $github }}
+          ports:
+            - name: ci-callback
+              containerPort: {{ .Values.worker.ciListenPort }}
+          {{- end }}
+          volumeMounts:
+            - name: bootstrap
+              mountPath: /secrets/bootstrap
+              readOnly: true
+            {{- if $github }}
+            - name: github
+              mountPath: /secrets/github
+              readOnly: true
+            {{- end }}
+          resources: {{- toYaml .Values.worker.resources | nindent 12 }}
+      volumes:
+        - name: bootstrap
+          secret:
+            secretName: {{ include "idp.bootstrapSecretName" . }}
+        {{- if $github }}
+        - name: github
+          secret:
+            secretName: {{ .Values.worker.github.privateKeySecret.name }}
+        {{- end }}
+      {{- with .Values.worker.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- if $github }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "idp.fullname" . }}-worker
+  labels: {{- include "idp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  type: {{ .Values.worker.service.type }}
+  selector: {{- include "idp.selector" (dict "Chart" .Chart "Release" .Release "component" "worker") | nindent 4 }}
+  ports:
+    - name: ci-callback
+      port: {{ .Values.worker.service.port }}
+      targetPort: ci-callback
+{{- end }}
+{{- end }}

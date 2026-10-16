@@ -1,0 +1,75 @@
+# Image tags default to the chart's appVersion (the platform release it was cut against).
+image:
+  registry: ghcr.io/rhysmcneill
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+# PostgreSQL is external; this chart does not bundle one. Set exactly one of url / existingSecret.
+database:
+  url: ""
+  # Existing Secret holding the connection string.
+  existingSecret: ""
+  existingSecretKey: DATABASE_URL # pragma: allowlist secret
+
+# Shared secret that lets the worker self-register (Decision 022). Generated once and kept
+# across upgrades via lookup. Under GitOps renderers (Argo CD, helm template) lookup returns
+# nothing and the token would change every sync, so set existingSecret there.
+bootstrapToken:
+  existingSecret: ""
+  existingSecretKey: worker-bootstrap-token # pragma: allowlist secret
+
+controlplane:
+  image:
+    repository: agentic-idp-controlplane
+    tag: ""
+  replicas: 1
+  port: 8080
+  # Opt-in telemetry endpoint; empty disables it.
+  telemetryEndpointUrl: ""
+  service:
+    type: ClusterIP
+    port: 80
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    host: ""
+    tls: []
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+worker:
+  enabled: true
+  image:
+    repository: agentic-idp-worker
+    tag: ""
+  # Stable identity registered with the control plane. Two workers must never share a name.
+  name: ""
+  pollInterval: ""
+  # Defaults to the in-cluster control plane Service.
+  controlPlaneUrl: ""
+  serviceAccount:
+    create: true
+    name: ""
+    # e.g. eks.amazonaws.com/role-arn for IRSA; this identity is the tier roles' trust anchor.
+    annotations: {}
+  # Only needed when a governed pipeline uses GitHub Actions.
+  github:
+    appId: ""
+    privateKeySecret:
+      name: ""
+      key: private-key.pem
+  # Externally reachable URL the CI OIDC callback is served on. Required when github.appId is set.
+  ciCallbackUrl: ""
+  ciListenPort: 8443
+  service:
+    type: ClusterIP
+    port: 8443
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+podAnnotations: {}
