@@ -14,8 +14,8 @@ TAG ?= $(shell git rev-parse --abbrev-ref HEAD | tr '/' '-')-$(COMMIT)
 REGISTRY ?= ghcr.io/rhysmcneill
 SOURCE_URL ?= https://github.com/rhysmcneill/agentic-idp
 
-# STABLE=true on a release publish also moves the X.Y and latest tags; edge
-# builds from main leave them alone.
+# STABLE=true also moves the X.Y and latest tags and requires TAG=X.Y.Z; CI uses it for
+# release publishes.
 STABLE ?= false
 PUBLISH_SERVICES ?= controlplane worker
 
