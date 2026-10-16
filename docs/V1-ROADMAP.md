@@ -26,7 +26,7 @@ Deliberately tiny. No OIDC, no catalog, no frontend.
 - CI on every PR: build, `go vet`, `gofmt -l`, `go test ./...`, `golangci-lint`
 - Dependabot enabled from the first `go.mod` — this is also the first thing that touches `pkg/ci`, `pkg/cloud` and `worker/internal/broker`, so scan it from day one
 - Codecov wired in alongside CI, establishing the coverage baseline before code accumulates that lowers it
-- Conventional commits adopted now, even though nothing consumes them yet — this is what makes semantic-release a drop-in later rather than a retrofit
+- Conventional commits adopted now, even though nothing consumes them yet — this is what makes release automation a drop-in later rather than a retrofit
 - **Dockerfiles for `controlplane` and `worker`**, plus `docker-compose.yml` for local dev — not deferred to Phase 3, because the Phase 0 milestone below is not real unless a customer can actually run these as containers
 - Add testing framework with [Floci](https://github.com/floci-io/floci) for AWS emulation in E2E testing — MIT-licensed, LocalStack-compatible, full IAM/STS (`AssumeRole` included), with matching Azure/GCP/OCI siblings that fit the `pkg/cloud.Broker` interface's multi-provider story (decision 017) if those providers are ever added
 
@@ -54,8 +54,9 @@ The differentiator. This is the phase to validate with design partners.
 **Delivery, alongside the above:**
 - **Image publishing**: tagged builds of `controlplane` and `worker` pushed to a registry (GHCR) on merge to `main` and on release — a design partner cannot pull and run something that only exists as source
 - Repo protections set up e.g. no push to main directly, no overwriting tags, tags must follow vX.Y.Z
-- **`semantic-release` goes live**, driven by the conventional commits already in place since Phase 0. One version for the whole monorepo, applied to every image tag — see [DELIVERY.md](DELIVERY.md) for why per-service versioning is rejected
+- **Release automation goes live** (release-please), driven by the conventional commits already in place since Phase 0. The platform images share one version across the monorepo; `idpctl` and the Helm chart release on their own streams — see [DELIVERY.md](DELIVERY.md) and [Decision 024](DECISIONS.md)
 - Helm chart added alongside the images, since this is also the first phase a design partner might actually deploy the platform
+- `idpctl` prebuilt binaries and an install guide ([CLI-INSTALL.md](CLI-INSTALL.md))
 
 **Milestone** — demoable as *"governed agent access to the pipelines you already run."*
 

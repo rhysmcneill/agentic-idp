@@ -26,6 +26,14 @@ Steps 1–6 are platform setup and happen once. Steps 7–9 repeat per team and 
 
 Helm into an existing cluster, or Docker Compose for evaluation. Requires PostgreSQL.
 
+```bash
+helm install idp oci://ghcr.io/rhysmcneill/charts/agentic-idp --version <chart-version> \
+  --namespace idp --create-namespace \
+  --set database.existingSecret=idp-database
+```
+
+The chart deploys the control plane and worker against your PostgreSQL (it does not bundle one) and generates the shared worker bootstrap secret. It has its own version stream (`chart-vX.Y.Z`), separate from the images and from `idpctl`; see [DELIVERY.md](DELIVERY.md). Install the CLI first: [CLI-INSTALL.md](CLI-INSTALL.md).
+
 A fresh instance has no admin credential at all. Run `idpctl setup` once — it prompts for a tenant name, admin username and password, creates them directly, and logs you in. From Phase 3, the UI does the same thing automatically: visiting a not-yet-configured instance shows this setup form instead of a login screen, calling the identical API underneath — CLI and UI are two clients of the same one-time `POST /v1/setup`, not two different mechanisms. That endpoint refuses permanently once it's been run — see [Decision 018](DECISIONS.md). OIDC is configured later (Phase 2); this local admin account is the only credential at this point and should be treated accordingly.
 
 ## 2. Create tier IAM roles

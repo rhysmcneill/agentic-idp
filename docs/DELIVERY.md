@@ -20,7 +20,7 @@ So delivery capability has to land **at or before** the roadmap phase whose mile
 | CI | Build, vet, format check, lint, test — on every PR |
 | Dockerfiles | One per deployable service, written when that service's entrypoint lands, not batched upfront: `controlplane`/`worker` in Phase 0, `mcp` in Phase 2, `frontend` in Phase 3 |
 | Image publishing | Tagged builds pushed to a registry on merge and release |
-| Versioning | `semantic-release`, driven by conventional commits |
+| Versioning | release-please, driven by conventional commits — three streams, see [Decision 024](DECISIONS.md) |
 | Dependency updates | Dependabot (or Renovate) |
 | Coverage | Codecov |
 | Helm / Compose | Deployment manifests, tracking the same versions as the images |
@@ -55,14 +55,16 @@ Targets land incrementally as the capability they wrap exists, but the shape abo
 - **CI**: `go build ./...`, `go vet ./...`, `gofmt -l` (fail on output), `go test ./...`, then `golangci-lint` once configured, all invoked via the Makefile. This is [CLAUDE.md](../CLAUDE.md)'s existing CI/CD bar, restated here as a delivery milestone rather than a background assumption.
 - **Dependabot**: enabled from the first `go.mod`. `pkg/ci` and the credential-handling packages are the ones that matter most here — see [CLAUDE.md](../CLAUDE.md) Security invariants.
 - **Codecov**: wired alongside CI. Cheap, and the point of doing it now is establishing the coverage number before code accumulates that quietly lowers it — a baseline set later is not a baseline, it's a negotiation.
-- **Conventional commits**: adopted now even though nothing consumes them yet, specifically so that turning on `semantic-release` in Phase 1 is a config change, not a rewrite of commit history or a "starting now" carve-out.
+- **Conventional commits**: adopted now even though nothing consumes them yet, specifically so that turning on release automation in Phase 1 is a config change, not a rewrite of commit history or a "starting now" carve-out.
 - **Dockerfiles**: `controlplane` and `worker` get one each, plus `docker-compose.yml` for local dev. This is not optional polish — the Phase 0 milestone requires a *customer-run* worker, and "customer-run" means containerised, not `go run` from a cloned repo. Sequencing: each service's Dockerfile is written once that service has a real `cmd/` entrypoint to build, not upfront against an empty skeleton — `controlplane`'s lands with its `cmd/server` work, `worker`'s with its `cmd/worker` work, `docker-compose.yml` once both exist to wire together. The Makefile's `docker-build-*` targets and Phase 0 tooling (CI, pre-commit, Dependabot, Codecov, conventional commits) still land first, since those apply from the first line of Go code regardless of which service it's in.
 
 ### Phase 1 — publishing and versioning go live
 
 - **Image publishing**: `controlplane` and `worker` images built and pushed to a registry (GHCR is the default choice — free for public/private repos, no separate account to manage, integrates with GitHub Actions directly) on merge to `main` and on tagged release.
-- **`semantic-release`**: turned on here, not before, because Phase 1 is the first point there's a real consumer (a design partner) who needs a real version to pull. Running it from Phase 0 would just generate version noise with no audience.
-- **Helm chart**: introduced alongside the images, since Phase 1 is also the first phase where a design partner might deploy the platform rather than just hear about it.
+- **release-please**: turned on here, not before, because Phase 1 is the first point there's a real consumer (a design partner) who needs a real version to pull. Running it from Phase 0 would just generate version noise with no audience. Three streams, per [Decision 024](DECISIONS.md): platform `vX.Y.Z`, CLI `idpctl-vX.Y.Z`, chart `chart-vX.Y.Z`.
+- **Helm chart**: `deploy/helm/agentic-idp`, versioned on its own stream and published as an OCI chart. It deploys the control plane and worker against an external PostgreSQL, generates the shared worker bootstrap secret once, runs both pods non-root with a read-only filesystem, and runs the worker as a single `Recreate` replica (each bootstrap rotates that name's credential, so two pods sharing a name would invalidate each other). It lands alongside the images because Phase 1 is also the first phase where a design partner might deploy the platform rather than just hear about it.
+- **`idpctl` binaries**: cross-compiled by `make cli-dist` and attached to the `idpctl-v*` release with a checksums file; installation is documented in [CLI-INSTALL.md](CLI-INSTALL.md).
+- **Repo protection** is code: `.github/rulesets/` holds the `main` branch rules (PR-only, rebase-merge, linear history, required checks) and immutable release tags (no update, no delete); import them under Settings → Rules.
 
 ### Phase 2 — scales, doesn't change shape
 
@@ -72,15 +74,23 @@ The MCP server becomes a fourth image in the same pipeline, at the same version.
 
 The frontend is built, versioned and published at the same release as the backend. `impeccable audit` findings (accessibility, performance, responsive behaviour) become a CI gate here, not an aspiration — see [CLAUDE.md](../CLAUDE.md) and [V1-ROADMAP.md](V1-ROADMAP.md) 3b on why accessibility is a sales requirement, not polish.
 
-## Versioning: one number for the whole monorepo
+## Versioning: one number for the platform, separate streams for the client and chart
 
-**Decision: a single semver for the entire release, applied identically to every image tag** (`controlplane:1.4.0`, `worker:1.4.0`, `mcp:1.4.0`), not independent per-service versions.
+**Decision: a single semver for the platform release, applied identically to every image tag** (`controlplane:1.4.0`, `worker:1.4.0`, `mcp:1.4.0`), not independent per-service versions. The CLI and Helm chart are released on their own streams ([Decision 024](DECISIONS.md)).
 
-This is not the default most monorepo tooling nudges you toward — independent per-package versioning is common and `semantic-release` supports it. It's rejected here for a reason specific to this product:
+Independent per-service versions are rejected for a reason specific to this product: [`docs/PLAN.md`](PLAN.md) already names **version sprawl** as an accepted cost of self-hosting — customers run whatever they installed, and several versions need support simultaneously. Per-service versions would compound that into a compatibility matrix: *does worker 2.1 talk to control-plane 1.9?* That question should never need asking. A self-hosted customer, and a support engineer helping them, should be able to say "we're running 1.4.0" as a complete description of what's deployed.
 
-[`docs/PLAN.md`](PLAN.md) already names **version sprawl** as an accepted cost of self-hosting — customers run whatever they installed, and several versions need support simultaneously. Independent per-service versions would compound that into a compatibility matrix: *does worker 2.1 talk to control-plane 1.9?* That question should never need asking. A self-hosted customer, and a support engineer helping them, should be able to say "we're running 1.4.0" as a complete description of what's deployed.
+The cost is real and accepted: a docs-only change to the frontend bumps the same version number as a broker security fix.
 
-The cost is real and accepted: a docs-only change to the frontend bumps the same version number as a broker security fix. That's a fine trade for legibility in a product whose core sale is "you can tell exactly what's running and who authorised it" — the versioning scheme should not undermine the same property the product exists to provide elsewhere.
+The CLI and chart are deliberately outside that rule. They are not server components that must be wire-compatible with each other at one version: `idpctl` is a client users install separately, and the chart is packaging. Each releases when it changes, and the chart's `appVersion` records which platform release it was cut against.
+
+| Stream | Tag | How it ships |
+|---|---|---|
+| Platform | `vX.Y.Z` | Images on GHCR: `X.Y.Z`, `X.Y`, `latest`; every merge to `main` also publishes `sha-<short>` |
+| CLI | `idpctl-vX.Y.Z` | Archives per OS/arch + `idpctl_X.Y.Z_checksums.txt` on the GitHub Release |
+| Chart | `chart-vX.Y.Z` | `oci://ghcr.io/rhysmcneill/charts/agentic-idp` and the `.tgz` on the GitHub Release |
+
+Release flow: conventional commits land on `main` via rebase-merged PRs (every commit is linted in CI, and each keeps its own paths and type) → release-please keeps one open release PR per stream with the version bump and `CHANGELOG.md` → merging a release PR tags and releases → the `Release` workflow publishes that stream's artifacts. While the version is below 1.0.0, breaking changes bump the minor.
 
 ## Registry and secrets
 
@@ -96,6 +106,6 @@ The cost is real and accepted: a docs-only change to the frontend bumps the same
 
 ## Open questions
 
-**Where does `idpctl` (the CLI) get distributed?** Not a container concern — it needs its own path (GitHub Releases with prebuilt binaries, a Homebrew tap, or both). Not yet placed in a phase; revisit once Phase 1 nears completion, since design partners running the onboarding sequence in [ONBOARDING.md](ONBOARDING.md) will need it.
+**Homebrew tap for `idpctl`.** Binaries and an install script ship from GitHub Releases ([CLI-INSTALL.md](CLI-INSTALL.md)). A tap is a convenience to add once a design partner asks for it.
 
 **How does the API get an OpenAPI spec, given `CLAUDE.md`'s "REST, OpenAPI-documented" rule?** Deliberately deferred rather than picked under time pressure with three handlers to look at. `swaggo/swag` was tried and reverted — it only generates Swagger 2.0 (its own maintainers have said OpenAPI 3 won't be supported), and its comment annotations are unenforced free text with the same drift risk as a hand-written spec. `oapi-codegen` (spec-first, generates a `ServerInterface` the compiler enforces) and `huma` (code-first, wraps stdlib `net/http`, spec derives automatically from struct tags — no annotations or hand-written YAML at all) are the two credible options; `huma` fits this project's "no manual spec authoring, ever" requirement best but means moving handlers into its input/output-struct calling convention, a real restructure. Revisit once the API surface is bigger than three endpoints and the actual pain of not having one is felt, rather than speculating now.
