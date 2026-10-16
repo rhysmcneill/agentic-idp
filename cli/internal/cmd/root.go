@@ -5,6 +5,9 @@ package cmd
 
 import "github.com/spf13/cobra"
 
+// version is stamped at release time via -ldflags; "dev" for local builds.
+var version = "dev"
+
 // NewRootCmd constructs the idpctl command tree.
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
@@ -12,6 +15,7 @@ func NewRootCmd() *cobra.Command {
 		Short:         "CLI client for the agentic-idp control plane",
 		SilenceUsage:  true,
 		SilenceErrors: false,
+		Version:       version,
 	}
 	root.AddCommand(newSetupCmd())
 	root.AddCommand(newAgentCmd())
