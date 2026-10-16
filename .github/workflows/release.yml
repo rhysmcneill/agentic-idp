@@ -1,0 +1,139 @@
+name: Release
+
+# release-please opens one release PR per stream from the conventional commits on main:
+#   platform  -> vX.Y.Z        (controlplane + worker images, one shared version)
+#   idpctl    -> idpctl-vX.Y.Z (prebuilt binaries)
+#   chart     -> chart-vX.Y.Z  (Helm chart, OCI)
+# Merging a release PR creates the tag and GitHub Release; the jobs below publish artifacts in the
+# same run, because tags created with a workflow token do not trigger other workflows.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    name: Release PRs
+    runs-on: ubuntu-latest
+    if: github.repository == 'rhysmcneill/agentic-idp'
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      platform_released: ${{ steps.rp.outputs.release_created }}
+      platform_version: ${{ steps.rp.outputs.version }}
+      platform_tag: ${{ steps.rp.outputs.tag_name }}
+      cli_released: ${{ steps.rp.outputs['cli--release_created'] }}
+      cli_version: ${{ steps.rp.outputs['cli--version'] }}
+      cli_tag: ${{ steps.rp.outputs['cli--tag_name'] }}
+      chart_released: ${{ steps.rp.outputs['deploy/helm/agentic-idp--release_created'] }}
+      chart_version: ${{ steps.rp.outputs['deploy/helm/agentic-idp--version'] }}
+      chart_tag: ${{ steps.rp.outputs['deploy/helm/agentic-idp--tag_name'] }}
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: rp
+        with:
+          # A PAT or GitHub App token, not GITHUB_TOKEN: PRs opened with GITHUB_TOKEN do not run CI,
+          # so the required checks never report and the release PR could not be merged.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  images-edge:
+    name: Publish edge images
+    runs-on: ubuntu-latest
+    if: github.repository == 'rhysmcneill/agentic-idp'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish
+        run: make publish TAG=sha-${GITHUB_SHA::7}
+
+  images-release:
+    name: Publish release images
+    needs: release-please
+    runs-on: ubuntu-latest
+    if: needs.release-please.outputs.platform_released == 'true'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.platform_tag }}
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish
+        run: make publish STABLE=true TAG=${{ needs.release-please.outputs.platform_version }}
+
+  cli:
+    name: Publish idpctl binaries
+    needs: release-please
+    runs-on: ubuntu-latest
+    if: needs.release-please.outputs.cli_released == 'true'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.cli_tag }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        run: make cli-dist CLI_VERSION=${{ needs.release-please.outputs.cli_version }}
+      - name: Generate checksums
+        working-directory: dist/idpctl
+        run: sha256sum idpctl_* > idpctl_${{ needs.release-please.outputs.cli_version }}_checksums.txt
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload ${{ needs.release-please.outputs.cli_tag }} dist/idpctl/* --clobber
+
+  chart:
+    name: Publish Helm chart
+    needs: release-please
+    runs-on: ubuntu-latest
+    if: needs.release-please.outputs.chart_released == 'true'
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.chart_tag }}
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - name: Lint
+        run: make helm-lint
+      - name: Package
+        run: helm package deploy/helm/agentic-idp --destination dist/chart
+      - name: Push to GHCR
+        env:
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$REGISTRY_PASSWORD" | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+          helm push dist/chart/agentic-idp-${{ needs.release-please.outputs.chart_version }}.tgz oci://ghcr.io/rhysmcneill/charts
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload ${{ needs.release-please.outputs.chart_tag }} dist/chart/*.tgz --clobber
