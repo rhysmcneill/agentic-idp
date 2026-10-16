@@ -5,7 +5,7 @@
 *.dll
 *.so
 *.dylib
-idpctl
+/idpctl
 agentic-idp-server
 agentic-idp-worker
 
