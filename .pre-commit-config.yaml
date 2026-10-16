@@ -25,6 +25,8 @@ repos:
       - id: no-commit-to-branch
         args: [--branch, main]
       - id: check-yaml
+        # Helm templates are Go-templated, not plain YAML; `make helm-lint` covers them.
+        exclude: ^deploy/helm/[^/]+/templates/
       - id: check-json
 
   - repo: https://github.com/dnephin/pre-commit-golang
