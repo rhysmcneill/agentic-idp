@@ -1,4 +1,5 @@
-# Image tags default to the chart's appVersion (the platform release it was cut against).
+# Image tags default to the chart's appVersion. The release workflow pins it to the latest platform
+# release when the chart is packaged; set an explicit tag to deploy anything else.
 image:
   registry: ghcr.io/rhysmcneill
   pullPolicy: IfNotPresent
