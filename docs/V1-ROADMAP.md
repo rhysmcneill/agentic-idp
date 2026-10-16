@@ -52,7 +52,7 @@ The differentiator. This is the phase to validate with design partners.
 - Opt-in telemetry
 
 **Delivery, alongside the above:**
-- **Image publishing**: tagged builds of `controlplane` and `worker` pushed to a registry (GHCR) on merge to `main` and on release — a design partner cannot pull and run something that only exists as source
+- **Image publishing**: tagged builds of `controlplane` and `worker` pushed to a registry (GHCR) on release — a design partner cannot pull and run something that only exists as source
 - Repo protections set up e.g. no push to main directly, no overwriting tags, tags must follow vX.Y.Z
 - **Release automation goes live** (release-please), driven by the conventional commits already in place since Phase 0. The platform images share one version across the monorepo; `idpctl` and the Helm chart release on their own streams — see [DELIVERY.md](DELIVERY.md) and [Decision 024](DECISIONS.md)
 - Helm chart added alongside the images, since this is also the first phase a design partner might actually deploy the platform
