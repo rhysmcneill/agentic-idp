@@ -240,3 +240,23 @@ The worker's actual trust question is flatter and narrower: "is this the registe
 **Why.** River already implements exactly the mechanics this queue needs — `SKIP LOCKED` claiming, `LISTEN`/`NOTIFY`-driven low-latency dispatch, lease timeouts with automatic reclaim on a dead claimant, retries with backoff — correctly and under load, per its own published scaling guidance (partial indexes scoped to pending work, `READ COMMITTED` isolation to avoid serialization failures at volume, avoiding the naive "every replica sees the same oldest rows" stampede). This is exactly the class of subsystem where a hand-rolled version reliably ships subtly wrong under concurrency well after the happy path looks fine in review. It is also inherently HA-safe: Postgres `NOTIFY` broadcasts to every listening connection across every control-plane replica, not only the one that issued it, so no replica pinning or sticky routing is needed for dispatch to work correctly across a horizontally-scaled control plane. License (MPL-2.0, weak/file-level copyleft, not viral) and maintenance status are compatible with the BSL/Apache extraction plan (Decision 012).
 
 **Consequence.** `runs` (our domain table: policy, tier, approval state) and River's own job table are two layers, not one — `runs` governs everything before `queued` (policy check, approval gating) and owns the terminal states (`succeeded`/`failed`/`cancelled`/`timed_out`); River governs only the safe hand-off of an already-approved run to exactly one claimant, with reclaim on failure. Bridging River's synchronous `Work(ctx, job)` model to the remote worker's asynchronous long-poll-then-report-back flow (potentially minutes apart, across HTTP requests) is an implementation detail still to be worked out when `controlplane/internal/run` is built, not resolved by this decision.
+
+---
+
+### 024 — release-please, three release streams: platform, `idpctl`, Helm chart
+
+**Decision.** Releases are driven by [release-please](https://github.com/googleapis/release-please) (replacing the `semantic-release` named in Decision 015 and the original roadmap), producing three independent streams from the same conventional commits:
+
+| Stream | Tag | Artifacts |
+|---|---|---|
+| Platform | `vX.Y.Z` | `controlplane` and `worker` images (later `mcp`, `frontend`), one shared version |
+| CLI | `idpctl-vX.Y.Z` | Prebuilt `idpctl` binaries for linux/darwin/windows across amd64, arm64 (and linux arm), plus checksums |
+| Helm chart | `chart-vX.Y.Z` | The chart, pushed to `oci://ghcr.io/rhysmcneill/charts` and attached to the release |
+
+**Why.** Decision 015 stands for everything that must be mutually compatible: the images share one version so "we run 1.4.0" fully describes a deployment. The CLI and chart are different. The CLI is a client installed on laptops and CI runners, and tying its cadence to server releases forces churn on users for no benefit. The chart changes for packaging reasons (a new probe, a values option) that don't touch the images. The chart's `appVersion` tracks the platform release and its image tags default to it, so the platform/chart relationship is still explicit.
+
+`semantic-release` was dropped because it fits one release stream per repo; multiple streams need a community monorepo plugin. It also commits `CHANGELOG.md` straight to `main`, which conflicts with the no-direct-push branch protection. release-please handles per-path streams natively and ships changes through a reviewable release PR, so `main` stays PR-only.
+
+**Consequence.** PRs are **rebase-merged**, not squashed, and every commit must be a conventional commit (linted in CI). Release-please assigns each commit to a stream by the paths it touches, never by its scope, so a squash would collapse a session's `cli/` and `controlplane/` work into one commit and bump both streams by one type. Rebasing keeps one commit per concern, which is what lets `feat` in the platform and `fix` in the CLI bump independently. Merge commits were rejected: the "Merge pull request" commit is not conventional and breaks the linear-history rule. The rule for authors is one commit per stream; a commit touching more than one stream bumps all of them. Changelog entries lose their `(#N)` PR links, because commit messages are no longer rewritten at merge.
+
+Release PRs need CI to run on them, so the workflow uses a `RELEASE_PLEASE_TOKEN` secret (a PAT or GitHub App token) rather than `GITHUB_TOKEN`. Paths are split by directory: `cli/` bumps `idpctl` only, `deploy/helm/agentic-idp/` bumps the chart only, and everything else (including shared `pkg/`) bumps the platform. A `pkg/` change that affects the CLI therefore does not bump it unless a `cli/` file changes in the same commit.
