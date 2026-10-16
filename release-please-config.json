@@ -10,17 +10,11 @@
       "package-name": "agentic-idp",
       "include-component-in-tag": false,
       "changelog-path": "CHANGELOG.md",
-      "extra-files": [
-        {
-          "type": "yaml",
-          "path": "deploy/helm/agentic-idp/Chart.yaml",
-          "jsonpath": "$.appVersion"
-        }
-      ],
       "exclude-paths": [
         "cli",
         "deploy/helm/agentic-idp"
-      ]
+      ],
+      "release-as": "0.1.0"
     },
     "cli": {
       "release-type": "simple",
@@ -28,7 +22,8 @@
       "component": "idpctl",
       "include-component-in-tag": true,
       "tag-separator": "-",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "release-as": "0.1.0"
     },
     "deploy/helm/agentic-idp": {
       "release-type": "helm",
@@ -36,7 +31,8 @@
       "component": "chart",
       "include-component-in-tag": true,
       "tag-separator": "-",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "release-as": "0.1.0"
     }
   }
 }

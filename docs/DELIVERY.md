@@ -82,7 +82,7 @@ Independent per-service versions are rejected for a reason specific to this prod
 
 The cost is real and accepted: a docs-only change to the frontend bumps the same version number as a broker security fix.
 
-The CLI and chart are deliberately outside that rule. They are not server components that must be wire-compatible with each other at one version: `idpctl` is a client users install separately, and the chart is packaging. Each releases when it changes, and the chart's `appVersion` records which platform release it was cut against.
+The CLI and chart are deliberately outside that rule. They are not server components that must be wire-compatible with each other at one version: `idpctl` is a client users install separately, and the chart is packaging. Each releases when it changes, and the chart's `appVersion` is set to the latest platform release at package time, so the chart's source is never touched by a platform release.
 
 | Stream | Tag | How it ships |
 |---|---|---|
@@ -90,7 +90,7 @@ The CLI and chart are deliberately outside that rule. They are not server compon
 | CLI | `idpctl-vX.Y.Z` | Archives per OS/arch + `idpctl_X.Y.Z_checksums.txt` on the GitHub Release |
 | Chart | `chart-vX.Y.Z` | `oci://ghcr.io/rhysmcneill/charts/agentic-idp` and the `.tgz` on the GitHub Release |
 
-Release flow: conventional commits land on `main` via rebase-merged PRs (every commit is linted in CI, and each keeps its own paths and type) → release-please keeps one open release PR per stream with the version bump and `CHANGELOG.md` → merging a release PR tags and releases → the `Release` workflow publishes that stream's artifacts. While the version is below 1.0.0, breaking changes bump the minor.
+Release flow: conventional commits land on `main` via rebase-merged PRs (every commit is linted in CI, and each keeps its own paths and type) → release-please keeps one open release PR per stream with the version bump and `CHANGELOG.md` → merging a release PR tags and releases → the `Release` workflow publishes that stream's artifacts. While the version is below 1.0.0, breaking changes bump the minor. The first release of each stream is pinned to `0.1.0` with `release-as` in `release-please-config.json` (release-please would otherwise start at 1.0.0); remove those three `release-as` lines once the first releases have shipped, or it will keep proposing 0.1.0.
 
 ## Registry and secrets
 

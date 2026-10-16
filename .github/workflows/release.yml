@@ -126,7 +126,18 @@ jobs:
       - name: Lint
         run: make helm-lint
       - name: Package
-        run: helm package deploy/helm/agentic-idp --destination dist/chart
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The chart's image tags default to appVersion, which must be a published platform
+          # release. Pin it to the latest one at package time so platform releases never edit the chart.
+          app_version="$(gh release list --limit 100 --json tagName --jq '[.[] | select(.tagName | test("^v[0-9]"))][0].tagName // ""' | sed 's/^v//')"
+          if [ -z "$app_version" ]; then
+            echo "no platform release yet; keeping appVersion from Chart.yaml"
+            helm package deploy/helm/agentic-idp --destination dist/chart
+          else
+            helm package deploy/helm/agentic-idp --app-version "$app_version" --destination dist/chart
+          fi
       - name: Push to GHCR
         env:
           REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
