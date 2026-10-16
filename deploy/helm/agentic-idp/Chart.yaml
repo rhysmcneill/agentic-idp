@@ -1,0 +1,9 @@
+apiVersion: v2
+name: agentic-idp
+description: Control plane and worker for the agentic-idp governed agent/human platform
+type: application
+version: 0.0.0
+appVersion: 0.0.0
+home: https://github.com/rhysmcneill/agentic-idp
+sources:
+  - https://github.com/rhysmcneill/agentic-idp

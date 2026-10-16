@@ -1,0 +1,115 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "idp.fullname" . }}-controlplane
+  labels: {{- include "idp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controlplane
+spec:
+  replicas: {{ .Values.controlplane.replicas }}
+  selector:
+    matchLabels: {{- include "idp.selector" (dict "Chart" .Chart "Release" .Release "component" "controlplane") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "idp.selector" (dict "Chart" .Chart "Release" .Release "component" "controlplane") | nindent 8 }}
+      annotations:
+        {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{ end }}
+    spec:
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: controlplane
+          image: {{ include "idp.image" (dict "root" . "cfg" .Values.controlplane) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- include "idp.securityContext" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.controlplane.port }}
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "idp.databaseSecretName" . }}
+                  key: {{ .Values.database.existingSecretKey }}
+            - name: LISTEN_PORT
+              value: {{ .Values.controlplane.port | quote }}
+            - name: WORKER_BOOTSTRAP_TOKEN_FILE
+              value: /secrets/bootstrap/{{ .Values.bootstrapToken.existingSecretKey }}
+            - name: PRODUCT_VERSION
+              value: {{ .Chart.AppVersion | quote }}
+            {{- with .Values.controlplane.telemetryEndpointUrl }}
+            - name: TELEMETRY_ENDPOINT_URL
+              value: {{ . | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: bootstrap
+              mountPath: /secrets/bootstrap
+              readOnly: true
+          readinessProbe:
+            tcpSocket:
+              port: http
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 15
+          resources: {{- toYaml .Values.controlplane.resources | nindent 12 }}
+      volumes:
+        - name: bootstrap
+          secret:
+            secretName: {{ include "idp.bootstrapSecretName" . }}
+      {{- with .Values.controlplane.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controlplane.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controlplane.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "idp.fullname" . }}-controlplane
+  labels: {{- include "idp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controlplane
+spec:
+  type: {{ .Values.controlplane.service.type }}
+  selector: {{- include "idp.selector" (dict "Chart" .Chart "Release" .Release "component" "controlplane") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.controlplane.service.port }}
+      targetPort: http
+{{- if .Values.controlplane.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "idp.fullname" . }}-controlplane
+  labels: {{- include "idp.labels" . | nindent 4 }}
+  {{- with .Values.controlplane.ingress.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.controlplane.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.controlplane.ingress.tls }}
+  tls: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ required "controlplane.ingress.host is required when ingress is enabled" .Values.controlplane.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "idp.fullname" . }}-controlplane
+                port:
+                  name: http
+{{- end }}

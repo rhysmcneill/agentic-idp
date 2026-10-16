@@ -1,0 +1,12 @@
+agentic-idp {{ .Chart.AppVersion }} installed.
+
+1. Create the admin (one-time, refuses afterwards):
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "idp.fullname" . }}-controlplane 8080:{{ .Values.controlplane.service.port }}
+   idpctl setup --server http://localhost:8080
+
+2. The worker starts with zero environments. Register an Environment, then grant it
+   to the worker (see docs/ONBOARDING.md steps 3 and 5):
+   idpctl worker list
+
+The worker's pod identity is the trust anchor your tier IAM roles must trust. On EKS, set
+worker.serviceAccount.annotations to your IRSA role.
