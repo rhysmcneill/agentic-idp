@@ -13,8 +13,7 @@
       "exclude-paths": [
         "cli",
         "deploy/helm/agentic-idp"
-      ],
-      "release-as": "0.1.0"
+      ]
     },
     "cli": {
       "release-type": "simple",
@@ -22,8 +21,7 @@
       "component": "idpctl",
       "include-component-in-tag": true,
       "tag-separator": "-",
-      "changelog-path": "CHANGELOG.md",
-      "release-as": "0.1.0"
+      "changelog-path": "CHANGELOG.md"
     },
     "deploy/helm/agentic-idp": {
       "release-type": "helm",
@@ -31,8 +29,7 @@
       "component": "chart",
       "include-component-in-tag": true,
       "tag-separator": "-",
-      "changelog-path": "CHANGELOG.md",
-      "release-as": "0.1.0"
+      "changelog-path": "CHANGELOG.md"
     }
   }
 }

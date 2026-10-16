@@ -90,7 +90,7 @@ The CLI and chart are deliberately outside that rule. They are not server compon
 | CLI | `idpctl-vX.Y.Z` | Archives per OS/arch + `idpctl_X.Y.Z_checksums.txt` on the GitHub Release |
 | Chart | `chart-vX.Y.Z` | `oci://ghcr.io/rhysmcneill/charts/agentic-idp` and the `.tgz` on the GitHub Release |
 
-Release flow: conventional commits land on `main` via rebase-merged PRs (every commit is linted in CI, and each keeps its own paths and type) → release-please keeps one open release PR per stream with the version bump and `CHANGELOG.md` → merging a release PR tags and releases → the `Release` workflow publishes that stream's artifacts. While the version is below 1.0.0, breaking changes bump the minor. The first release of each stream is pinned to `0.1.0` with `release-as` in `release-please-config.json` (release-please would otherwise start at 1.0.0); remove those three `release-as` lines once the first releases have shipped, or it will keep proposing 0.1.0.
+Release flow: conventional commits land on `main` via rebase-merged PRs (every commit is linted in CI, and each keeps its own paths and type) → release-please keeps one open release PR per stream with the version bump and `CHANGELOG.md` → merging a release PR tags and releases → the `Release` workflow publishes that stream's artifacts. While the version is below 1.0.0, breaking changes bump the minor.
 
 ## Registry and secrets
 
