@@ -60,7 +60,7 @@ Targets land incrementally as the capability they wrap exists, but the shape abo
 
 ### Phase 1 — publishing and versioning go live
 
-- **Image publishing**: `controlplane` and `worker` images built and pushed to a registry (GHCR is the default choice — free for public/private repos, no separate account to manage, integrates with GitHub Actions directly) on merge to `main` and on tagged release.
+- **Image publishing**: `controlplane` and `worker` images built and pushed to a registry (GHCR is the default choice — free for public/private repos, no separate account to manage, integrates with GitHub Actions directly) when a platform release is cut. Unreleased `main` builds are not published; add them back if a design partner needs to test ahead of a release.
 - **release-please**: turned on here, not before, because Phase 1 is the first point there's a real consumer (a design partner) who needs a real version to pull. Running it from Phase 0 would just generate version noise with no audience. Three streams, per [Decision 024](DECISIONS.md): platform `vX.Y.Z`, CLI `idpctl-vX.Y.Z`, chart `chart-vX.Y.Z`.
 - **Helm chart**: `deploy/helm/agentic-idp`, versioned on its own stream and published as an OCI chart. It deploys the control plane and worker against an external PostgreSQL, generates the shared worker bootstrap secret once, runs both pods non-root with a read-only filesystem, and runs the worker as a single `Recreate` replica (each bootstrap rotates that name's credential, so two pods sharing a name would invalidate each other). It lands alongside the images because Phase 1 is also the first phase where a design partner might deploy the platform rather than just hear about it.
 - **`idpctl` binaries**: cross-compiled by `make cli-dist` and attached to the `idpctl-v*` release with a checksums file; installation is documented in [CLI-INSTALL.md](CLI-INSTALL.md).
@@ -86,7 +86,7 @@ The CLI and chart are deliberately outside that rule. They are not server compon
 
 | Stream | Tag | How it ships |
 |---|---|---|
-| Platform | `vX.Y.Z` | Images on GHCR: `X.Y.Z`, `X.Y`, `latest`; every merge to `main` also publishes `sha-<short>` |
+| Platform | `vX.Y.Z` | Images on GHCR: `X.Y.Z`, `X.Y`, `latest` |
 | CLI | `idpctl-vX.Y.Z` | Archives per OS/arch + `idpctl_X.Y.Z_checksums.txt` on the GitHub Release |
 | Chart | `chart-vX.Y.Z` | `oci://ghcr.io/rhysmcneill/charts/agentic-idp` and the `.tgz` on the GitHub Release |
 
