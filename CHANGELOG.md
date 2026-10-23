@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/rhysmcneill/agentic-idp/compare/v0.1.0...v0.1.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* **ci:** update renovate node index path to /app/index.js ([b53fbc7](https://github.com/rhysmcneill/agentic-idp/commit/b53fbc7ebca20ceef8cadce5b67b41eed2b7c25d))
+
 ## 0.1.0 (2026-10-16)
 
 
