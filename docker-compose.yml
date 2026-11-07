@@ -19,7 +19,7 @@ services:
   # One-shot: generates the shared worker bootstrap secret (Decision 022) on
   # first run only, so controlplane and worker always read the same value.
   bootstrap-secret:
-    image: alpine:3.20
+    image: alpine:3.24
     command: sh -c "test -f /shared/worker-bootstrap-token || (head -c32 /dev/urandom | od -An -tx1 | tr -d '[:space:]' > /shared/worker-bootstrap-token)"
     volumes:
       - bootstrap-secret:/shared
